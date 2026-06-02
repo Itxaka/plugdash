@@ -12,12 +12,15 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 # Build a fully static binary (pure-Go SQLite, so CGO can stay off). TARGETOS /
-# TARGETARCH are provided automatically by buildx for the requested platform.
+# TARGETARCH / TARGETVARIANT are provided automatically by buildx for the
+# requested platform; TARGETVARIANT (e.g. v7) maps to GOARM for 32-bit arm.
 COPY . .
 ARG TARGETOS
 ARG TARGETARCH
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags="-s -w" -o /plugdash ./cmd/plugdash
+ARG TARGETVARIANT
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOARM=${TARGETVARIANT#v} \
+    go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /plugdash ./cmd/plugdash
 
 # --- Final stage ---
 FROM gcr.io/distroless/static-debian12
