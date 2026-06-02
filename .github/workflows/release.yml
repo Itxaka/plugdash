@@ -40,7 +40,7 @@ jobs:
         run: cp /etc/ssl/certs/ca-certificates.crt ca-certificates.crt
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: "~> v2"
