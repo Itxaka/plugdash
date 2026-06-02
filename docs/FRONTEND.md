@@ -9,7 +9,7 @@ build step** — the code that ships is exactly the code that runs in the browse
 It consists of three files under `web/assets/`:
 
 - `index.html` — the page shell (topbar, nav, an empty `<main>`).
-- `app.js` — the entire application (`"use strict"`, ~1700 lines).
+- `app.js` — the entire application (`"use strict"`, ~1850 lines).
 - `style.css` — all styling.
 
 The assets are embedded into the Go binary via `go:embed` and served from the
@@ -34,8 +34,10 @@ Because everything is embedded and self-contained, the app **works fully
 offline**: there are no CDN script/style references and no remote web fonts —
 all styling is local CSS, and all glyphs/icons are Unicode characters (emoji and
 symbols like `↻`, `✎`, `⠿`). The only network traffic the SPA generates is to
-the dashboard's own `/api/*` endpoints (plus any outbound calls those endpoints
-make server-side, and links the user explicitly opens).
+the dashboard's own `/api/*` endpoints — including a long-lived SSE connection
+to `/api/stream` while the dashboard is open (see "Live-update client" below) — plus
+any outbound calls those endpoints make server-side, and links the user
+explicitly opens.
 
 ## DOM helpers and the API wrapper
 
@@ -83,6 +85,8 @@ Removes all children of a node (`while (node.firstChild) ...`). Used to reset
 | `API.updateTracker(id, body)` | `PUT /api/trackers/:id` (JSON) |
 | `API.deleteTracker(id)` | `DELETE /api/trackers/:id` |
 | `API.runTracker(id)` | `GET /api/trackers/:id/run` |
+| `API.run()` | `GET /api/run` — current snapshots for every tracker (one-shot hydrate / poll fallback) |
+| `API.forceTracker(id)` | `GET /api/trackers/:id/run?force=true` — ask the engine to re-run one tracker now |
 | `API.rescanPlugins()` | `POST /api/plugins/rescan` |
 | `API.getLogs()` | `GET /api/logs` |
 | `API.clearLogs()` | `DELETE /api/logs` |
@@ -90,6 +94,27 @@ Removes all children of a node (`while (node.firstChild) ...`). Used to reset
 | `API.saveSettings(body)` | `PUT /api/settings` (JSON) |
 
 IDs are passed through `encodeURIComponent`.
+
+### Live-update client — `startUpdates` / `stopUpdates`
+
+Runs are **server-driven**: the backend engine executes trackers on their
+cadence and pushes results; the client no longer schedules its own runs. Two
+module-level functions manage the live connection (state lives in `streamSource`
+for the `EventSource`, `pollTimer` for the fallback loop, and `onSnapshot` for
+the current handler):
+
+- **`startUpdates(handler)`** — tears down any existing connection, then opens an
+  `EventSource` on `/api/stream`. Each pushed `snapshot` event is `JSON.parse`d
+  (malformed frames ignored) and passed to `handler(snapshot)`, where `snapshot`
+  has the same shape as a `/api/run` array element. On connect the server
+  **replays** the current snapshots, so cards fill immediately. If the
+  `EventSource` errors and ends up `CLOSED` (auto-reconnect gave up), or the
+  browser lacks `EventSource`, it falls back to **`startPoll`** — `API.run()`
+  immediately, then `setInterval` every **8s** — dispatching each snapshot
+  through the same `handler`.
+- **`stopUpdates()`** — closes the `EventSource`, clears the poll timer, and
+  nulls `onSnapshot`. Called whenever the dashboard is torn down or another view
+  is entered, so the server can notice the watcher left.
 
 ## Views and routing
 
@@ -113,7 +138,8 @@ The single entry point for switching views. It:
 2. Updates `currentView`.
 3. Syncs the URL hash (`location.hash = view`) so views are **deep-linkable**.
 4. Sets `main.className = "main view-" + view` (see below).
-5. Tears down timers via `clearAutoRefresh()` and `clearLogsTimer()`.
+5. Tears down the live connection via `stopUpdates()` and the Logs poll via
+   `clearLogsTimer()`.
 6. Toggles the `.active` class on the matching nav button.
 7. Dispatches to the view's render function.
 
@@ -143,9 +169,52 @@ the form-centric views are constrained and centered:
 ## Dashboard rendering
 
 `renderDashboard` builds a slim right-aligned toolbar (`.dash-toolbar`)
-containing the Auto-refresh toggle, the edit-mode toggle (`✎`), and a
+containing the **Live** toggle, the edit-mode toggle (`✎`), and a
 "refresh all now" button (`↻`), then a `body` container that holds the card
-grid (`.grid`, an auto-fill CSS grid of `minmax(300px, 1fr)` columns).
+grid (`.grid`, an auto-fill CSS grid of `minmax(300px, 1fr)` columns). It first
+calls `stopUpdates()` (so re-rendering the view never leaves a stale stream
+running) and loads `settingsCache` if not already present.
+
+The render closes over a `byId` map (`tracker id → { tracker, card }`) and a set
+of small closures that drive the live updates:
+
+- **`applySnapshot(snap)`** — the handler passed to `startUpdates`. It looks the
+  snapshot up in `byId` by `snap.tracker_id` (ignoring unknown ids), derives the
+  timestamp from `snap.fetched_at`, and calls `fillCard` to repaint just that
+  card.
+- **`hydrateOnce()`** — a single `API.run()` that paints every card from the
+  current server snapshots, with no ongoing updates.
+- **`connect()`** — when the **Live** toggle is on, `startUpdates(applySnapshot)`
+  (SSE live stream, with the 8s poll fallback); when off, `stopUpdates()` then a
+  one-shot `hydrateOnce()`.
+
+### The Live toggle and presence
+
+The toolbar **Live** switch is bound to `settingsCache.autorefresh_enabled`
+(which now **defaults to `true`** via `SETTINGS_DEFAULTS`), so the dashboard
+defaults to ON. Toggling it updates the setting, calls `connect()` to re-wire the
+connection, and persists via `API.saveSettings` (non-fatal on failure):
+
+- **ON** — an open `EventSource` on `/api/stream`: the server pushes each
+  refreshed snapshot and the matching card updates live.
+- **OFF** — a single one-shot hydrate via `API.run()` and nothing more; cards
+  show the last server snapshot, frozen.
+
+This client↔presence relationship is the point of the design: execution is
+server-driven and **presence-gated**. An open SSE subscriber (or the polling
+fallback, which also hits the server) is what tells the engine to keep
+refreshing trackers; when the dashboard is closed or navigated away — at which
+point `stopUpdates()` runs — the engine sees no watchers and idles. One upstream
+fetch serves every connected client instead of each browser querying on its own.
+
+### Force refresh
+
+The toolbar `↻` calls `forceOne(t, card)` for every card; each card's footer `↻`
+calls `forceOne` for just that widget. `forceOne` marks the card loading and
+calls `API.forceTracker(id)`, asking the engine to re-run that tracker now. Under
+the live stream the fresh snapshot arrives as a pushed `snapshot` event; when
+Live is off, `forceOne` schedules a delayed `hydrateOnce()` (~1.5s later) to pull
+the result.
 
 ### Card shell — `buildCardShell(tracker)`
 
@@ -158,13 +227,20 @@ structured as head / body / footer:
   color, background tint, and inset ring are derived from that color.
 - **Title** — the user's tracker name (`tracker.name`, falling back to
   `"Tracker"`).
+- **`config` badge** — for **file-managed** trackers (`tracker.source ===
+  "file"`), a small `config` badge (`.config-badge`, "Managed by config file
+  (read-only)") sits next to the title. db-backed trackers have no badge.
 - **Subtitle** — set later from the plugin result's own title (see `fillCard`).
 - **Drag handle** — the `⠿` glyph (`.card-handle`, "Drag to reorder").
 - **Edit-mode actions** — an edit (`✎`) and delete (`✕`) button
-  (`.card-actions`), hidden unless the dashboard is in edit mode.
+  (`.card-actions`), hidden unless the dashboard is in edit mode. For
+  file-managed trackers both buttons are **omitted entirely** (`editBtn` /
+  `deleteBtn` are `null`), so config-as-code widgets can't be edited or deleted
+  from the UI.
 - **Footer** (`.card-foot`) — refresh **cadence** ("updates every 2m"),
   **updated** timestamp ("updated 3m ago"), and a per-card force-refresh button
-  (`↻`).
+  (`↻`). The force button is present for **all** trackers, file-managed ones
+  included.
 
 The card also exposes its per-type accent color to CSS:
 `root.style.setProperty("--type", ic.c)` — used for the head tint, hover ring,
@@ -190,80 +266,41 @@ Cards are a fixed `height: 300px` with `overflow: hidden`; tall content scrolls
 inside the `.card-body` rather than letting one card tower over its neighbors,
 keeping a multi-row grid tidy.
 
-`fillCard(card, tracker, res, intervalSec, at)` fills a card from a successful
-run: it clears `is-loading`, updates the footer, applies the status strip, sets
-the title (always the tracker name) and the **subtitle** (the plugin result's
-`title`, shown only when it differs from the tracker name), then renders the
-visualization into the body. `fillCardError(...)` renders a `.card-error` row and
-forces a `fail` status strip.
+`fillCard(card, tracker, res, intervalSec, at)` fills a card from a snapshot
+(whether pushed over SSE or fetched via `API.run()`): it clears `is-loading`,
+updates the footer, applies the status strip, sets the title (always the tracker
+name) and the **subtitle** (the plugin result's `title`, shown only when it
+differs from the tracker name), then renders the visualization into the body. If
+the snapshot carries an `error` (or no `result`), it delegates to
+`fillCardError(...)`, which renders a `.card-error` row and forces a `fail`
+status strip.
 
-## Per-widget refresh model
+## Refresh model — server-driven, presence-gated
 
-Each widget refreshes on **its own cadence**, not a single global tick.
+Refresh scheduling lives on the **server** now. The backend engine runs each
+tracker on its own cadence (the per-tracker override or the plugin's declared
+default) and pushes the result; the client only renders what it receives.
 
-- **`cardStates`** — one `state` per card: `{ tracker, card, intervalSec,
-  lastRun, running }`.
-- **Effective interval** — `intervalSec` comes from the run result's
-  `refresh_interval_seconds` (which reflects the tracker's per-tracker override
-  or the plugin's declared default). It is updated whenever a run returns a
-  positive value.
-- **`refreshCard(state, force)`** — re-runs a single widget via
-  `API.runTracker`. When `force` is false it is **skipped** if the widget's
-  interval has not elapsed since `lastRun`. On success it calls `fillCard` and
-  `saveWidgetCache`; on error, `fillCardError`. It always records `lastRun` and
-  resets `running`.
-- **In-flight guard** — `if (state.running) return;` at the top of `refreshCard`
-  prevents a timer tick from overlapping a run already in progress.
-- **`armAutoRefresh()`** — when the master toggle is on, arms one
-  `setInterval` per card at `intervalSec * 1000`, each calling
-  `refreshCard(state, true)`. Cheap/volatile widgets tick often; slow/expensive
-  ones rarely. `autoRefreshTimers` holds the handles; `clearAutoRefresh()`
-  clears them all (also called on every view switch).
-- **Master Auto-refresh toggle** — a switch in the toolbar bound to
-  `settingsCache.autorefresh_enabled`. Toggling it re-arms timers and persists
-  the setting via `API.saveSettings`, reverting (and re-arming) on failure.
-- **Force-refresh** — the toolbar `↻` calls `load(true)`, forcing a fresh run of
-  every card; each card's footer `↻` calls `refreshCard(state, true)` for just
-  that widget.
+- Each pushed `snapshot` carries `refresh_interval_seconds`, so the card footer's
+  "updates every …" cadence is taken straight from the server's view, never
+  computed or scheduled in the browser.
+- There are **no per-widget client timers** and **no client-side run loop** —
+  `applySnapshot` simply repaints the matching card whenever a snapshot arrives,
+  whether that's a live SSE push or a `/api/run` poll/hydrate.
+- The only client-side timer involved is the **8s poll fallback** inside
+  `startUpdates`, used solely when the `EventSource` is unavailable, and it just
+  re-fetches the server's current snapshots rather than running anything itself.
 
-## localStorage widget cache
+The **Live** toggle and the client↔presence relationship that gates execution
+are described under "Dashboard rendering" above.
 
-To avoid re-querying external APIs (e.g. GitHub) on every page reload — which
-would hammer rate limits, especially for slow daily-cadence widgets — each
-widget's last result is cached in `localStorage`.
-
-- **`widgetSig(tracker)`** — a JSON signature of
-  `[plugin_id, config, refresh_interval_seconds]`. Editing a tracker's config or
-  interval changes the signature, which **invalidates the cache automatically**.
-- **Key** — `widgetCacheKey(id)` = `"plugdash:w:" + id`.
-- **`loadWidgetCache(tracker)`** — returns the stored `{ sig, res, at }` entry
-  only if its `sig` matches the current `widgetSig`; otherwise `null`. Wrapped in
-  try/catch so corrupt/unavailable storage is treated as a miss.
-- **`saveWidgetCache(tracker, res)`** — stores `{ sig, res, at: Date.now() }`;
-  best-effort (silently ignores quota/availability errors).
-- **`clearWidgetCache(id)`** — removes the entry; called when a widget is
-  deleted from the dashboard.
-
-### `hydrateOrRefresh(state)`
-
-The load policy that spares external APIs on reloads:
-
-```js
-const cached = loadWidgetCache(state.tracker);
-if (cached && cached.res) {
-  // render immediately from cache...
-  const age = Date.now() - (cached.at || 0);
-  if (state.intervalSec > 0 && age < state.intervalSec * 1000) {
-    return; // still fresh — no network call
-  }
-}
-return refreshCard(state, true); // stale or absent — fetch
-```
-
-So a normal load (page open / F5 / view switch) renders from cache while it is
-**younger than the widget's interval**, and only fetches stale/absent widgets. A
-manual "refresh all" instead forces `refreshCard(s, true)` for every card,
-bypassing the cache.
+> **Removed legacy behavior.** Earlier versions kept a per-widget `localStorage`
+> result cache (`widgetSig` / `loadWidgetCache` / `saveWidgetCache` /
+> `clearWidgetCache`, keyed `plugdash:w:<id>`) and armed one `setInterval` per
+> card to self-refresh, with a `hydrateOrRefresh` cache-vs-fetch policy on load.
+> **All of that is gone.** The server-side engine plus the SSE stream replaces
+> it: there is no client widget cache and no client refresh timer. The only
+> remaining browser `localStorage` use is the theme preference (`plugdash:theme`).
 
 ## Edit mode
 
@@ -275,11 +312,13 @@ editToggle.classList.toggle("active", on);
 ```
 
 CSS reveals the per-card `.card-actions` (edit/delete) only while `.main.editing`
-is set. The per-card **edit** button stashes the tracker id in `pendingEditId`
-and switches to the Trackers view (`setView("configure")`); `renderConfigure`
-reads `pendingEditId`, opens that tracker in the edit form, scrolls it into
-view, and clears the flag. The per-card **delete** button confirms, calls
-`API.deleteTracker`, clears the widget cache, and reloads the grid.
+is set — and only for db-backed trackers, since file-managed ones never build
+those buttons (see "Card shell"). The per-card **edit** button stashes the
+tracker id in `pendingEditId` and switches to the Trackers view
+(`setView("configure")`); `renderConfigure` reads `pendingEditId`, opens that
+tracker in the edit form, scrolls it into view, and clears the flag. The per-card
+**delete** button confirms, calls `API.deleteTracker`, then rebuilds the grid
+(`build()`) and re-wires the live connection (`connect()`).
 
 ## Drag-and-drop reordering
 
@@ -310,6 +349,12 @@ existing trackers and a **form** panel. Plugins and trackers are loaded together
 The list (`refreshList`) renders one `.tracker-row` per tracker (icon + name +
 plugin name) with **Edit** and **Delete** buttons. Edit opens the tracker in the
 form; Delete calls `API.deleteTracker` then refreshes the list (`afterChange`).
+
+**File-managed trackers are read-only here too.** When `tracker.source ===
+"file"`, the row **omits** both the Edit and Delete buttons and shows a `config`
+badge ("Managed by config file (read-only)") next to the name — matching the
+dashboard card treatment. Only db-backed trackers get the action buttons and the
+schema-driven edit form.
 
 ### Schema-driven form — `buildForm` / `renderSchemaForm`
 
@@ -352,8 +397,9 @@ type, normalizes the refresh interval (`< 1` becomes `0`), and POSTs/PUTs
 
 An **Auto-refresh** panel with:
 
-- **Enable auto-refresh** checkbox — the master switch (mirrors the dashboard
-  toggle).
+- **Enable auto-refresh** checkbox — backed by the same `autorefresh_enabled`
+  setting as the dashboard's **Live** toggle (defaults on), so the two stay in
+  sync.
 - **Debug logging** checkbox — logs every run, query and plugin output (viewable
   in Logs).
 - **GitHub token** password field — used by GitHub widgets to raise the API

@@ -111,6 +111,81 @@ external plugin stderr. Logs are written to stderr and also kept in an in-memory
 ring buffer served at `/api/logs`; the effective log level can be toggled at
 runtime from the Settings UI.
 
+## Config-as-code / Declarative configuration
+
+In addition to creating trackers in the UI, plugdash can read a declarative YAML
+config file. Run it with:
+
+```
+plugdash --config /path/to/plugdash.yaml
+```
+
+Trackers defined in the file are reconciled into the database on startup and
+shown **read-only** in the UI: they carry a `config` badge and their Edit/Delete
+controls are disabled. This is a **hybrid** model — users can still add their own
+ad-hoc trackers through the UI, and those are independent and fully editable.
+Removing a tracker from the file (or starting without `--config` at all) deletes
+the file-managed trackers on the next start; user-created trackers are never
+touched.
+
+Trackers are matched and updated by a stable `key`, so editing a name or config
+in the file updates the existing widget in place and preserves its dashboard
+position. If `key` is omitted it is derived by slugifying `name` (for example,
+`Kubernetes Releases` becomes `kubernetes-releases`).
+
+A ready-to-edit example lives at [`examples/plugdash.yaml`](../examples/plugdash.yaml).
+
+### YAML schema
+
+```yaml
+settings:                          # optional; applied at startup, NOT persisted to the DB settings row
+  github_token: "ghp_..."          # optional; exported as GITHUB_TOKEN if that env var isn't already set
+  debug: false                     # optional; enable verbose logging
+
+trackers:
+  - key: k8s-releases              # optional stable identity; defaults to slug(name)
+    plugin: github-releases        # REQUIRED: the plugin ID
+    name: Kubernetes releases      # display title (defaults to key if omitted)
+    refresh_interval_seconds: 300  # optional; 0 or omitted = plugin default cadence
+    config:                        # plugin-specific configuration map
+      repo: kubernetes/kubernetes
+      count: 5
+```
+
+| Field                              | Required | Description                                                                                   |
+| ---------------------------------- | -------- | --------------------------------------------------------------------------------------------- |
+| `settings.github_token`            | no       | Authenticates all GitHub plugins; exported as `GITHUB_TOKEN` only if that env var is unset.   |
+| `settings.debug`                   | no       | Enables verbose logging when `true`.                                                          |
+| `trackers[].key`                   | no       | Stable identity used to match/update the tracker across restarts. Defaults to `slug(name)`.   |
+| `trackers[].plugin`                | **yes**  | The plugin ID to run (see the built-in plugin IDs below).                                     |
+| `trackers[].name`                  | no       | Display title. Defaults to `key` if omitted.                                                  |
+| `trackers[].refresh_interval_seconds` | no    | Per-tracker cadence in seconds. `0` or omitted uses the plugin's default cadence.             |
+| `trackers[].config`                | no       | Plugin-specific configuration map (the same fields you'd fill in the tracker's UI form).      |
+
+Built-in plugin IDs available for `plugin`: `github-releases`,
+`github-release-artifacts`, `github-repo-stats`, `github-actions-status`,
+`github-activity`, `github-activity-rate`, `github-issues`, `http-health`,
+`rss-feed`, `docker-image`, `file-version`. External plugins are also usable by
+their registered ID.
+
+### Validation rules
+
+Parsing is strict and fails the whole startup on any problem (a parse or
+validation error is fatal):
+
+- **Unknown keys are rejected** — typos in field names surface loudly with an
+  error rather than being silently ignored.
+- `plugin` is **required** on every tracker.
+- **Duplicate keys are an error** — two trackers sharing a key (explicit or
+  derived) would fight over one row.
+
+### Precedence
+
+Config-file `settings` apply on top of the stored DB settings at startup but are
+**not** saved back to the DB settings row. The UI stays authoritative for any
+settings the user changes there. (`github_token` still respects an explicit
+`GITHUB_TOKEN` already present in the environment — see below.)
+
 ### GitHub authentication and rate limits
 
 GitHub plugins authenticate using a token resolved with the following

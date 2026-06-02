@@ -9,11 +9,22 @@ single-page app embedded into the binary with `go:embed`. The core idea is **jus
 time-series or historical is ever stored. When a tracker runs, the plugin reconstructs everything it
 needs (including charts "over time") from the timestamps on the source data it fetches right then.
 
+Trackers do not run in the browser. A **server-side execution engine** (`internal/engine`) runs each
+tracker on its own cadence and caches the *latest* result per tracker as a **`Snapshot`**, which all
+connected clients share — so N clients cost one upstream API call, not N. The engine is
+**presence-gated**: it only runs while at least one client is watching and goes fully idle (zero
+upstream calls) otherwise. Clients receive snapshots over **Server-Sent Events** (`/api/stream`),
+falling back to cached polling when SSE is unavailable. This caching is still real-time only — just
+the latest snapshot, never history. Trackers may also be declared in a YAML **config file**
+(`--config`) and reconciled into the store alongside ad-hoc UI-created ones.
+
 ## Table of Contents
 
 - [Core idea](#core-idea)
 - [Component diagram](#component-diagram)
 - [Request / data-flow walkthrough](#request--data-flow-walkthrough)
+- [Execution engine, SSE & presence](#execution-engine-sse--presence)
+- [Config-as-code](#config-as-code)
 - [Components](#components)
 - [Plugin lifecycle](#plugin-lifecycle)
 - [Concurrency & safety](#concurrency--safety)
@@ -40,30 +51,39 @@ Plugin.Run(ctx, Config) -> Result{ Visualization, Title, Data }
 
 ```
                          Browser (embedded SPA: web/assets/app.js)
-                                   |  HTTP + JSON  (/api/...)
-                                   v
+                EventSource(/api/stream)  ──or fallback──>  GET /api/run (8s)
+                                   ^  SSE snapshot events    |  HTTP + JSON  (/api/...)
+                                   |                         v
 +--------------------------------------------------------------------------+
 |                         internal/server (HTTP handlers)                  |
 |   routes:  /api/plugins[/rescan]  /api/trackers[/{id}[/run]]             |
-|            /api/run  /api/settings  /api/logs                            |
+|            /api/run  /api/stream (SSE)  /api/settings  /api/logs         |
 |                                                                          |
-|   runTracker(): per-run 30s timeout + tracker-scoped slog logger         |
-|   handleRunAll(): fan-out with concurrency cap (8)                       |
+|   /api/stream: Subscribe() -> replay snapshots + push, 25s keepalive    |
+|   /api/run: serves cached snapshots, records Poll() presence            |
+|   per-widget refresh -> engine.Force(id);  CRUD -> engine.Reconcile()   |
 |   LogRing (ring buffer) + dynamic slog LevelVar (debug toggle)           |
-+----------------+----------------------------+----------------------------+
-                 |                            |                            |
-                 v                            v                            v
-   +-----------------------+     +------------------------+     +---------------------+
-   |  internal/plugin      |     |   internal/store       |     |  internal/extplugin |
-   |  Plugin interface     |     |   SQLite: trackers     |     |  Manager (discover/ |
-   |  Registry (RWMutex)   |     |   + settings, migrate  |     |  rescan)            |
-   |  context logger       |     |   (modernc.org/sqlite) |     |  ExternalPlugin     |
-   +-----------+-----------+     +------------------------+     |  adapter (exec)     |
-               |                                                +----------+----------+
-               | Registry holds, keyed by ID:                             |
-               |   - built-in plugins (internal/plugins/*)                | registers
-               |   - external plugins (adapters) <------------------------+ into registry
-               v
++--------+-------------------+----------------------+----------------------+
+         |                   |                      |                      |
+         v                   v                      v                      v
++--------------------+  +-----------------+  +------------------+  +---------------------+
+| internal/engine    |  | internal/plugin |  |  internal/store  |  |  internal/extplugin |
+| scheduler (1s tick)|  | Plugin interface|  |  SQLite: trackers|  |  Manager (discover/ |
+| Snapshot cache     |  | Registry        |  |  + settings,     |  |  rescan)            |
+| presence-gated     |  | (RWMutex)       |  |  source=file/db, |  |  ExternalPlugin     |
+| SSE subscribers    |  | context logger  |  |  migrate         |  |  adapter (exec)     |
+| sem(8), 30s/run    |  +--------+--------+  |  + config_key    |  +----------+----------+
++---------+----------+           |          +--------+---------+             |
+          |                      |                   ^                       |
+          | runs trackers        |                   | reconciles trackers  | registers
+          | (reg.Get +           |          internal/config (--config YAML) -+ into
+          |  plugin.Run, caches  |                                            registry
+          |  Snapshot, SSE push) |                                            |
+          +----------+-----------+ <----------------------------------------+
+                     | Registry holds, keyed by ID:
+                     |   - built-in plugins (internal/plugins/*)
+                     |   - external plugins (adapters)
+                     v
    +-----------------------------------------------------------+
    |  internal/plugins/*  (built-in plugins)                   |
    |  github-releases, github-activity, http-health, rss-feed, |
@@ -77,38 +97,99 @@ Plugin.Run(ctx, Config) -> Result{ Visualization, Title, Data }
 
 ## Request / data-flow walkthrough
 
-A single tracker run (`GET /api/trackers/{id}/run`):
+**How a widget gets its data.** Unlike a classic request-per-widget design, the browser does not
+trigger plugin runs. The **engine** runs trackers on the server on their own cadence, caches the
+latest **`Snapshot`** per tracker, and pushes it to clients:
 
-1. **Browser** calls `api("/api/trackers/{id}/run")` (see `web/assets/app.js`).
-2. **HTTP API** (`server.handleRunTracker`) parses the id and loads the tracker from the **store**
-   (`store.GetTracker`). Missing rows become `404`.
-3. The handler builds a request context with `runCtx`, attaching a **tracker-scoped logger**
-   (`plugin.WithLogger`) tagged with `tracker_id`, `plugin`, and `tracker` so everything the plugin
-   logs is attributable.
-4. `runTracker` looks the plugin up in the **registry** (`reg.Get(t.PluginID)`). Unknown plugin ids
-   are returned as a per-tracker error, not a crashed request.
-5. It computes the effective refresh cadence (tracker override if set, else the plugin default),
-   applies a **30s per-run timeout** (`context.WithTimeout`), and calls
-   `plugin.Run(ctx, plugin.Config(t.Config))`.
-6. The plugin fetches from its source and returns a **`Result{Visualization, Title, Data}`** (or an
-   error, which is captured into the response, not propagated as an HTTP failure).
-7. The handler serializes the `runResponse` (tracker metadata + `Result` *or* `Error`) to **JSON**.
-8. The **frontend renderer** (`renderViz` in `app.js`) switches on `result.visualization` and calls
-   the matching renderer (`renderList`, `renderTable`, `renderChecklist`, `renderStat`,
-   `renderTimeseries`; unknown types fall back to `renderRaw`).
+1. **Browser** opens an `EventSource` on `GET /api/stream`. The server `Subscribe()`s it to the
+   engine, which immediately **replays the current snapshots** so the dashboard paints from cache.
+2. Whenever the **engine** re-runs a tracker (because its interval elapsed, a viewer just arrived, or
+   a per-widget refresh forced it), it caches the new snapshot and **broadcasts** a `snapshot` SSE
+   event to every subscriber.
+3. The **frontend renderer** (`renderViz` in `app.js`) switches on `snapshot.result.visualization`
+   and calls the matching renderer (`renderList`, `renderTable`, `renderChecklist`, `renderStat`,
+   `renderTimeseries`; unknown types fall back to `renderRaw`), repainting just that widget.
+4. If SSE fails or closes, the browser **falls back to polling `GET /api/run` every 8s** — a cached
+   read that returns all current snapshots *and* keeps the engine considered "present" (`Poll()`).
 
-The **"run all"** path (`GET /api/run`, `handleRunAll`):
+So one upstream call per tracker per interval serves every connected client, and no upstream call is
+made at all while nobody is watching.
 
-- Loads every tracker, then fans out one goroutine per tracker, each gated by a **semaphore capped at
-  8** concurrent runs.
-- Each goroutine writes into a pre-sized `results[i]` slice, so output **preserves tracker order**.
-- A per-tracker failure is recorded in that tracker's `runResponse.Error`; the request as a whole
-  still returns `200` with the full array. The frontend renders one widget per entry.
+**Inside a single engine run** (`engine.runOne`, the mechanics each scheduled or forced run uses):
 
-Other endpoints follow the same shape: `GET/POST/PUT/DELETE /api/trackers` for CRUD,
+1. The engine looks the plugin up in the **registry** (`reg.Get(t.PluginID)`). Unknown plugin ids
+   become a per-tracker `Snapshot.Error`, not a crashed run.
+2. It builds a context with a **tracker-scoped logger** (`plugin.WithLogger`) tagged with
+   `tracker_id`, `plugin`, and `tracker` so everything the plugin logs is attributable.
+3. It applies a **30s per-run timeout** (`context.WithTimeout`), gates on the **semaphore capped at
+   8** concurrent runs, and calls `plugin.Run(ctx, plugin.Config(t.Config))`.
+4. The plugin fetches from its source and returns a **`Result{Visualization, Title, Data}`** (or an
+   error, captured into `Snapshot.Error`).
+5. The engine stamps `FetchedAt`, stores the `Snapshot` in its cache, and broadcasts it (above).
+
+The cached-read paths reuse those snapshots without re-running plugins:
+
+- `GET /api/run` (`handleRunAll`) serves the engine's current snapshots in **tracker order** and
+  records presence so the engine keeps scheduling for poll-only clients. It never fans out plugin
+  runs itself.
+- `GET /api/trackers/{id}/run` / per-widget refresh calls `engine.Force(id)`, which runs that one
+  tracker immediately regardless of presence or interval, then returns/pushes its snapshot.
+- A per-tracker failure is isolated in that snapshot's `Error`; other widgets are unaffected.
+
+Other endpoints follow the same shape: `GET /api/stream` for the SSE snapshot feed,
+`GET/POST/PUT/DELETE /api/trackers` for CRUD (each mutation triggers `engine.Reconcile()`),
 `GET /api/plugins` to list available plugins + their config schema (so the UI can build forms),
 `POST /api/plugins/rescan` to re-discover external plugins, `GET/PUT /api/settings`, and
-`GET/DELETE /api/logs`.
+`GET/DELETE /api/logs`. File-defined (`source="file"`) trackers reject UI edits/deletes.
+
+## Execution engine, SSE & presence
+
+The **`internal/engine`** package moves tracker execution off the browser and onto the server, so the
+cost of a busy dashboard is decoupled from the number of viewers.
+
+- **Server-side scheduling.** A single goroutine loop (`Engine.loop`) ticks every **1s** and runs any
+  tracker whose **effective interval** has elapsed — the tracker's `refresh_interval_seconds`
+  override if set, else the plugin's declared default, else **60s** (`effectiveInterval`). Runs are
+  bounded by a **semaphore of 8** concurrent runs and a **30s per-run timeout**, identical to the old
+  in-handler limits. A tracker already running is never double-started.
+- **Snapshot cache.** Each run produces a **`Snapshot`** (`{tracker_id, name, plugin_id,
+  refresh_interval_seconds, result | error, fetched_at}`) stored in an in-memory map keyed by tracker
+  id. This is the *only* cache: the latest result per tracker, **no history** — fully consistent with
+  the just-in-time principle (still no time-series store; charts are reconstructed per run). All
+  clients read from this one cache, so **N clients = 1 upstream call** per tracker per interval.
+- **Presence-gating.** The scheduler only runs trackers while at least one client is **present**.
+  Presence = an open SSE subscriber on `/api/stream`, **or** a cached-poll `GET /api/run` within the
+  last **20s** (`pollPresenceTTL`, recorded by `Poll()`). With nobody watching, `clientCount()`
+  returns 0 and the loop idles, making **zero upstream calls**. This is the key efficiency property: a
+  dashboard left closed costs nothing.
+- **SSE push.** `GET /api/stream` is a Server-Sent Events endpoint. `Engine.Subscribe()` returns a
+  buffered channel pre-loaded with **all current snapshots** (so a fresh client paints from cache
+  immediately) and registers the subscriber; thereafter every re-run is `broadcast` as a
+  `snapshot` event. The handler emits **25s keepalive** comments. A slow subscriber's buffer
+  (`subBuffer = 64`) **drops frames rather than blocking** the engine. Subscribing counts as presence
+  and nudges the scheduler, so the first viewer triggers an immediate refresh of due work.
+- **Polling fallback.** If `EventSource` fails or closes, the browser polls `GET /api/run` every
+  **8s**. That is a cached read of `SnapshotAll()` (tracker order, runs nothing) which also calls
+  `Poll()` to keep presence alive — so poll-only clients still drive the scheduler.
+- **Force.** A per-widget refresh calls `Engine.Force(id)`, enqueued on `forceC` and serviced
+  immediately by the loop; it runs that one tracker **regardless of presence or interval**.
+- **Reconcile.** After any tracker create/update/delete (or a config reload), the server calls
+  `Engine.Reconcile()`, which reloads the tracker set from the store and **drops cached snapshots and
+  last-run times for trackers that were removed or whose config/interval/plugin changed**
+  (`trackerChanged`) so nothing is served stale against an old config. New trackers run on the next
+  tick.
+
+## Config-as-code
+
+An optional `--config <file.yaml>` declaratively defines trackers, reconciled into the SQLite store at
+startup by **`internal/config`** alongside ad-hoc trackers created in the UI — a **hybrid model**.
+
+- Trackers from the file are stored with **`source="file"`** and are **read-only in the UI** (the API
+  rejects edits/deletes of them). Trackers created through the UI are **`source="db"`**.
+- Reconciliation matches file entries by a stable **`config_key`**, so a file-defined tracker keeps
+  its row id (and therefore its dashboard order) across restarts even as its config changes.
+- Entries removed from the file are **deleted on the next start**; **`source="db"` trackers are never
+  touched** by reconciliation. After reconciling, the engine's `Reconcile()` picks up the new set.
 
 ## Components
 
@@ -133,11 +214,36 @@ Other endpoints follow the same shape: `GET/POST/PUT/DELETE /api/trackers` for C
   `plugin.LoggerFrom(ctx).Debug(...)`. With no logger present, a discard logger is returned so
   callers never nil-check.
 
+### `internal/engine` — server-side execution & SSE fan-out
+
+- **`Engine`** owns the scheduler loop, the per-tracker `Snapshot` cache, the SSE subscriber set, and
+  presence tracking, all guarded by a single `sync.Mutex`. Constructed with the registry, store, and
+  logger; `Reconcile()` loads the initial tracker set and `Start()` launches `loop`.
+- **`loop`** ticks every **1s** and, *only while a client is present*, runs every due tracker
+  (`runDue`); it services `Force` requests immediately regardless of presence, and a `wake` nudge
+  (new subscriber / reconcile / returning poller) runs due work without waiting for the next tick.
+- **`runOne`** is the run mechanics: semaphore (`maxConcurrent = 8`), `runTimeout = 30s`,
+  tracker-scoped logger, `reg.Get` + `plugin.Run`, then cache the `Snapshot` and `broadcast`.
+- **Presence** (`clientCount`): open SSE subscribers plus a recent `Poll()` within `pollPresenceTTL`
+  (**20s**). Zero presence ⇒ the loop runs nothing ⇒ zero upstream calls.
+- **Fan-out**: `Subscribe()` (replay + register, returns frame channel + unsubscribe), `broadcast`
+  (non-blocking send to all subs; `subBuffer = 64`, drop on slow client), `Snapshot`/`SnapshotAll`
+  (cached reads), `Force` (immediate one-tracker run), `Reconcile` (reload + drop stale snapshots).
+
+### `internal/config` — declarative trackers (config-as-code)
+
+- Parses an optional `--config <file.yaml>` into tracker definitions and reconciles them into the
+  store at startup. File trackers are stored `source="file"` and matched on a stable `config_key` so
+  they keep their ids/order across restarts; entries dropped from the file are deleted next start;
+  `source="db"` (UI-created) trackers are left untouched. The engine then `Reconcile()`s the result.
+
 ### `internal/store` — persistence (SQLite)
 
 - Pure-Go driver `modernc.org/sqlite` (no CGO). Opened in WAL mode with foreign keys on.
-- **`Tracker`**: `{ ID, PluginID, Name, Config map[string]any, RefreshIntervalSeconds, CreatedAt }`.
-  `RefreshIntervalSeconds == 0` means "use the plugin default". `Config` is stored as JSON text.
+- **`Tracker`**: `{ ID, PluginID, Name, Config map[string]any, RefreshIntervalSeconds, Source,
+  ConfigKey, CreatedAt }`. `RefreshIntervalSeconds == 0` means "use the plugin default". `Source` is
+  `"db"` (UI-created) or `"file"` (config-as-code, read-only in the UI); `ConfigKey` is the stable
+  match key used to reconcile file trackers. `Config` is stored as JSON text.
 - **CRUD**: `CreateTracker`, `UpdateTracker` (plugin_id is intentionally immutable so the stored
   config never mismatches a different schema), `GetTracker`, `ListTrackers` (ordered by creation),
   `DeleteTracker`.
@@ -149,16 +255,20 @@ Other endpoints follow the same shape: `GET/POST/PUT/DELETE /api/trackers` for C
   `Debug`, and `GitHubToken`. `GetSettings` falls back to `DefaultSettings()` when unset and
   `normalize()`s bounds.
 
-### `internal/server` — HTTP API & run orchestration
+### `internal/server` — HTTP API & engine front-end
 
-- **`Server`** wires the registry, store, embedded static FS, logger, log ring, and dynamic level
-  into an `http.Handler` via a `http.ServeMux`. `routes()` registers the `/api/...` endpoints and
-  serves the SPA at `/` from the embedded FS.
-- **Handlers** cover plugin listing/rescan, tracker CRUD + run, run-all, settings, and logs.
-  `handleListPlugins` emits a `pluginDTO` per plugin including its schema and an `external` flag
-  (detected via an `IsExternal()` interface assertion, avoiding an import of `extplugin`).
-- **Run orchestration**: `runTracker` applies the 30s timeout and tracker-scoped logger and captures
-  per-tracker errors; `handleRunAll` fans out under a semaphore cap of 8.
+- **`Server`** wires the registry, store, **engine**, embedded static FS, logger, log ring, and
+  dynamic level into an `http.Handler` via a `http.ServeMux`. `routes()` registers the `/api/...`
+  endpoints and serves the SPA at `/` from the embedded FS.
+- **Handlers** cover plugin listing/rescan, tracker CRUD + run, the cached run-all, the SSE stream,
+  settings, and logs. `handleListPlugins` emits a `pluginDTO` per plugin including its schema and an
+  `external` flag (detected via an `IsExternal()` interface assertion, avoiding an import of
+  `extplugin`).
+- **Engine delegation**: the server no longer runs plugins inline. `GET /api/stream` subscribes the
+  caller to the engine and streams `snapshot` events with 25s keepalives; `GET /api/run` serves
+  `SnapshotAll()` and records `Poll()` presence; per-widget refresh calls `engine.Force(id)`; every
+  tracker CRUD mutation calls `engine.Reconcile()`. Edits/deletes of `source="file"` trackers are
+  rejected.
 - **Settings side effects**: saving settings flips the dynamic debug level (`applyDebugLevel`) and
   exports a configured `GitHubToken` as the `GITHUB_TOKEN` env var for all GitHub plugins.
 - **Log ring + dynamic level** (`logbuffer.go`): `LogRing` is a fixed-size, mutex-guarded ring buffer
@@ -202,9 +312,11 @@ Other endpoints follow the same shape: `GET/POST/PUT/DELETE /api/trackers` for C
 
 - `web.go` uses `//go:embed assets` and exposes `web.FS()`, re-rooted so `index.html` is at `/`. The
   server mounts it with `http.FileServer`.
-- `web/assets/app.js` is a vanilla-JS SPA: it calls the `/api/...` endpoints, renders the dashboard /
-  configure / settings / logs screens, and maps each `Result.visualization` to a renderer in
-  `renderViz`.
+- `web/assets/app.js` is a vanilla-JS SPA: it subscribes to `/api/stream` with an `EventSource`
+  (falling back to polling `/api/run` every 8s if SSE fails/closes), calls the other `/api/...`
+  endpoints, renders the dashboard / configure / settings / logs screens, and maps each snapshot's
+  `Result.visualization` to a renderer in `renderViz`. File-defined trackers render without
+  edit/delete controls.
 
 ## Plugin lifecycle
 
@@ -214,11 +326,15 @@ Other endpoints follow the same shape: `GET/POST/PUT/DELETE /api/trackers` for C
    external executables and registers their adapters into the *same* registry. From here on, internal
    and external plugins are indistinguishable to the rest of the system.
 2. **Configuration → tracker.** A user picks a plugin in the UI (its `ConfigSchema` drives the form),
-   fills it in, and the config is persisted as a `Tracker` row via `POST /api/trackers`. The plugin
-   id is fixed for the life of the tracker.
-3. **Run on demand.** A tracker runs only when asked — a single run, a run-all, or the optional
-   auto-refresh timer. Each run gets a fresh **30s timeout** and a **tracker-scoped logger** attached
-   to the context. The plugin fetches live data and returns a `Result`. Results are never stored;
+   fills it in, and the config is persisted as a `source="db"` `Tracker` row via `POST /api/trackers`.
+   Alternatively, trackers are declared in the `--config` YAML and reconciled in as `source="file"`
+   (read-only). Either way the plugin id is fixed for the life of the tracker. Each create/update/
+   delete (and the config reconcile) calls `engine.Reconcile()`.
+3. **Run on the server, on a cadence.** The **engine** runs each tracker on its **effective interval**
+   while at least one client is present, caches the latest result as a **`Snapshot`**, and pushes it
+   over SSE; when nobody is watching it idles and makes no upstream calls. Each run gets a fresh **30s
+   timeout** and a **tracker-scoped logger**. A per-widget refresh (`engine.Force`) runs one tracker
+   immediately regardless of interval/presence. Results are never stored beyond the latest snapshot;
    anything historical is reconstructed from source timestamps on each run.
 4. **Rescan.** External plugins can be re-discovered at runtime via `POST /api/plugins/rescan`
    without restarting; built-in plugins are untouched.
@@ -227,11 +343,15 @@ Other endpoints follow the same shape: `GET/POST/PUT/DELETE /api/trackers` for C
 
 - **Registry** is guarded by a `sync.RWMutex`: many concurrent `Get`/`List` reads, exclusive
   `Register`/`Unregister`. `Register` panics on a duplicate id (a startup programming error).
-- **Run-all** caps concurrency with a buffered-channel semaphore of **8**, so a large number of
-  trackers can't spawn unbounded goroutines or connections. Results are written into a pre-sized,
-  index-addressed slice (no shared mutation), preserving order without a lock.
+- **Engine** keeps its snapshot cache, last-run map, running-set, subscriber set, and presence
+  timestamp under one `sync.Mutex`; the scheduler is a single goroutine and each run is its own
+  goroutine, so no plugin runs hold the lock. A tracker already in `running` is never double-started.
+- **Concurrency cap** is a buffered-channel semaphore of **8** in the engine, so a large number of
+  trackers can't spawn unbounded goroutines or connections.
+- **SSE broadcast** is non-blocking: a subscriber whose 64-frame buffer is full has the frame
+  dropped rather than stalling the engine; unsubscribe closes the channel under the lock.
 - **Per-run timeout** of 30s bounds every plugin invocation; per-tracker errors are isolated into the
-  response and never fail the whole batch.
+  snapshot's `Error` and never fail other trackers or the stream.
 - **External exec safety**: `exec.CommandContext` kills the process on context cancel; `WaitDelay`
   (2s) bounds how long exec waits afterward for lingering children holding the output pipes;
   stdout/stderr are capped at 8 MiB to guard against runaway processes.
@@ -246,17 +366,22 @@ Other endpoints follow the same shape: `GET/POST/PUT/DELETE /api/trackers` for C
 plugdash/
 ├── cmd/plugdash/
 │   └── main.go                 Entry point: open store, build logger/ring, register
-│                               built-ins, load external plugins, start HTTP server.
+│                               built-ins, load external plugins, reconcile --config,
+│                               start engine + HTTP server.
 ├── internal/
 │   ├── plugin/
 │   │   ├── plugin.go           Plugin interface, Result, Config, Visualization, ConfigField.
 │   │   ├── registry.go         Concurrent (RWMutex) plugin registry keyed by id.
 │   │   └── log.go              Context-carried tracker-scoped logger (WithLogger/LoggerFrom).
+│   ├── engine/
+│   │   └── engine.go           Server-side scheduler, Snapshot cache, presence-gating,
+│   │                           SSE fan-out (1s tick, sem 8, 30s/run).
+│   ├── config/                 --config YAML parsing + store reconcile (source=file).
 │   ├── store/
-│   │   ├── store.go            SQLite Tracker CRUD + schema migrations (modernc.org/sqlite).
+│   │   ├── store.go            SQLite Tracker CRUD (source/config_key) + migrations.
 │   │   └── settings.go         Dashboard-wide settings (single JSON row) + bounds.
 │   ├── server/
-│   │   ├── server.go           HTTP handlers, run orchestration, run-all semaphore (8).
+│   │   ├── server.go           HTTP handlers; /api/stream SSE; delegates runs to engine.
 │   │   └── logbuffer.go        Log ring buffer + slog ring handler.
 │   ├── extplugin/
 │   │   ├── external.go         ExternalPlugin adapter: stdio describe/run protocol.
@@ -289,8 +414,18 @@ plugdash/
 
 - **Just-in-time, no stored history.** The database stores configuration (trackers + settings) only.
   Every run fetches fresh data, and any "over time" view (e.g. a `timeseries` stars chart) is
-  reconstructed from the timestamps on the source data at run time. There is no time-series store, no
-  cache of results, and therefore no stale-data reconciliation to maintain.
+  reconstructed from the timestamps on the source data at run time. There is no time-series store and
+  no persisted history; the only cache is the engine's in-memory **latest snapshot per tracker**
+  (dropped/invalidated on reconcile), so there is no stale-data reconciliation to maintain.
+- **Run on the server, share one result, idle when unwatched.** Plugin execution lives in the engine,
+  not the browser. All clients read one cached snapshot per tracker, so cost scales with the number
+  of *trackers*, not the number of *viewers* — and because scheduling is presence-gated, a dashboard
+  nobody is looking at makes zero upstream calls. Real-time push (SSE) with a cached-poll fallback
+  keeps clients current without each one driving its own API calls.
+- **Hybrid declarative + ad-hoc config.** Trackers can be declared in a YAML file
+  (`source="file"`, read-only, reconciled by stable `config_key`) or added through the UI
+  (`source="db"`). Reconciliation only ever touches file trackers, so the two sources coexist without
+  clobbering each other across restarts.
 - **Plugins isolated behind one interface.** Everything a data source needs to do is expressed
   through `plugin.Plugin` (+ `Config` in, `Result` out). The server, registry, and frontend never
   know what a plugin does internally; the frontend only knows the five visualization tags.

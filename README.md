@@ -15,6 +15,25 @@ binary with the frontend embedded.
 > latest releases, activity charts, Docker image checks and endpoint health —
 > each widget refreshing on its own cadence, colour-coded by health.
 
+### Highlights
+
+- **Live updates over SSE.** The browser subscribes to a stream
+  (`/api/stream`) and results are pushed as they're ready — no manual reload.
+  A **Live** toggle (on by default) controls it.
+- **Server-side, shared execution.** Trackers run on the *server* on their own
+  cadence; the latest result is cached and shared by every client, so a hundred
+  viewers cost one upstream call, not a hundred. Real-time only (no history).
+- **Presence-gated efficiency.** The server only refreshes while someone is
+  actually watching (an SSE client is connected, or there's been a recent
+  `/api/run` poll within 20s). With nobody watching it idles and makes **zero**
+  upstream API calls.
+- **Config-as-code.** Point `--config` at a YAML file to declare trackers
+  declaratively; they're reconciled into the DB and shown read-only in the UI
+  (a `config` badge, edit/delete disabled). Users can still add their own
+  trackers through the UI — a hybrid model. See
+  [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and
+  [examples/plugdash.yaml](examples/plugdash.yaml).
+
 ### A quick tour
 
 ![plugdash views — Dashboard, Trackers, Settings, Logs](docs/images/tour.gif)
@@ -98,19 +117,26 @@ Then open <http://localhost:8080> in your browser. Use the **Configure** section
 to add a tracker (pick a plugin, fill in its fields, save), and it will appear on
 the dashboard. Set a **GitHub token** in **Settings** to raise the API rate limit.
 
-## Refresh & auto-refresh
+## Refresh & live updates
 
-The dashboard has a global **auto-refresh** toggle and interval. That interval is
-the dashboard's *polling tick* — how often it checks whether any widgets are due
-to be re-run.
+Trackers run on the **server**, not in the browser. A server-side engine runs
+each tracker on **its own plugin-declared cadence**: every plugin reports a
+`RefreshInterval()` (surfaced over the API as `refresh_interval_seconds`), so a
+cheap, volatile source (an HTTP health check, ~30s) re-runs often while an
+expensive, slow-moving one (releases or star history, ~daily) is not hammered.
+The latest result for each tracker is **cached and shared by all clients**, so N
+viewers cost one upstream call rather than N. Results are real-time only — no
+history is kept.
 
-Each widget, however, refreshes on **its own plugin-declared cadence**: every
-plugin reports a `RefreshInterval()` (surfaced over the API as
-`refresh_interval_seconds`), and the dashboard treats that value as a per-widget
-floor. So a cheap, volatile source (an HTTP health check, ~30s) re-runs often,
-while an expensive, slow-moving one (releases or star history, ~daily) is not
-hammered on every tick. Each widget shows its own cadence, and a **force-refresh
-button** on the widget re-runs it immediately, ignoring the interval.
+New results are **pushed to the browser over Server-Sent Events** (`/api/stream`)
+as soon as they're ready. A **Live** toggle (on by default) on the Dashboard
+controls the stream; a **force-refresh button** on each widget re-runs it
+immediately, ignoring the cadence, and each widget shows its own interval.
+
+The engine is **presence-gated**: it only refreshes while someone is watching —
+an SSE client is connected, or there's been a recent `/api/run` poll within the
+last 20 seconds. When nobody is looking it idles and makes **zero** upstream API
+calls.
 
 Dashboard cards are **drag-and-drop reorderable**, and the chosen order
 **persists** across reloads.
@@ -122,7 +148,9 @@ Dashboard cards are **drag-and-drop reorderable**, and the chosen order
 | `-addr` | `:8080`       | HTTP listen address.                 |
 | `-db`   | `plugdash.db` | Path to the SQLite database file. Resolved to an absolute path at startup; created if it does not exist. |
 | `-plugins-dir` | _(see below)_ | Directory of external plugin executables. Defaults to `$PLUGDASH_PLUGINS_DIR`, else `~/.config/plugdash/plugins`. |
+| `-config` | _(none)_ | Path to a declarative config file (YAML, "config-as-code"). Trackers in it are reconciled into the DB and shown read-only in the UI. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md). |
 | `-debug` | `false` | Verbose logging (each run, outbound queries, plugin output). Also via `PLUGDASH_DEBUG=1` or the Settings toggle. |
+| `-version` | `false` | Print the version and exit. |
 
 ```sh
 ./plugdash -addr :9000 -db /var/lib/plugdash/data.db
@@ -149,10 +177,10 @@ back to `GITHUB_TOKEN`.
 
 Each **tracker** refreshes on its own cadence. When you add or edit a tracker the
 refresh interval is prefilled with the plugin's declared default and you can
-override it per tracker. The dashboard arms one timer per widget at its own
-interval (a cheap health check every 30s, a release tracker daily). The
-**Auto-refresh** toggle on the Dashboard is the master on/off; there is no single
-global interval. Each widget also has a force-refresh button and shows its
+override it per tracker. The server-side engine runs one schedule per tracker at
+its own interval (a cheap health check every 30s, a release tracker daily) and
+pushes results to the browser over SSE. The **Live** toggle on the Dashboard
+controls the stream; each widget also has a force-refresh button and shows its
 cadence.
 
 **Logs & debug.** Turn on debug logging via `-debug`, `PLUGDASH_DEBUG=1`, or the

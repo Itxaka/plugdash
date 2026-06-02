@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"plugdash/internal/config"
+	"plugdash/internal/engine"
 	"plugdash/internal/extplugin"
 	"plugdash/internal/plugin"
 	"plugdash/internal/plugins/dockerimage"
@@ -36,6 +38,7 @@ func main() {
 	dbPath := flag.String("db", "plugdash.db", "path to the SQLite database file")
 	pluginsDir := flag.String("plugins-dir", "", "directory of external plugin executables (default: $PLUGDASH_PLUGINS_DIR or ~/.config/plugdash/plugins)")
 	debug := flag.Bool("debug", false, "enable verbose debug logging (also via PLUGDASH_DEBUG=1 or the Settings toggle)")
+	configPath := flag.String("config", "", "path to a declarative config file (YAML); trackers in it are reconciled and shown read-only in the UI")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
@@ -54,6 +57,29 @@ func main() {
 	}
 	defer st.Close()
 
+	// Declarative config ("config-as-code"): reconcile file-managed trackers into
+	// the store. They are marked source="file" and shown read-only in the UI;
+	// user-created trackers are untouched. Removing the flag (or an entry) removes
+	// the corresponding file trackers on the next start.
+	var fileCfg *config.Config
+	if *configPath != "" {
+		c, cerr := config.Load(*configPath)
+		if cerr != nil {
+			log.Fatalf("config: %v", cerr)
+		}
+		if rerr := st.ReconcileFileTrackers(c.FileTrackers()); rerr != nil {
+			log.Fatalf("config reconcile: %v", rerr)
+		}
+		fileCfg = c
+		log.Printf("config: loaded %d tracker(s) from %s", len(c.Trackers), *configPath)
+	} else {
+		// No config file: drop any file trackers left over from a previous run that
+		// did use one, so the UI never shows orphaned read-only widgets.
+		if rerr := st.ReconcileFileTrackers(nil); rerr != nil {
+			log.Printf("config: clearing stale file trackers: %v", rerr)
+		}
+	}
+
 	// Structured logging: a dynamic level (toggled by -debug / PLUGDASH_DEBUG /
 	// the persisted setting / the Settings UI) feeding both stderr and an
 	// in-memory ring buffer served at /api/logs.
@@ -71,6 +97,15 @@ func main() {
 		// A token saved in Settings authenticates all GitHub plugins.
 		if s.GitHubToken != "" && os.Getenv("GITHUB_TOKEN") == "" {
 			_ = os.Setenv("GITHUB_TOKEN", s.GitHubToken)
+		}
+	}
+	// Config-file settings apply on top (without persisting to the DB row).
+	if fileCfg != nil {
+		if fileCfg.Settings.Debug {
+			debugOn = true
+		}
+		if fileCfg.Settings.GitHubToken != "" && os.Getenv("GITHUB_TOKEN") == "" {
+			_ = os.Setenv("GITHUB_TOKEN", fileCfg.Settings.GitHubToken)
 		}
 	}
 	if debugOn {
@@ -106,6 +141,14 @@ func main() {
 		}
 		srv.SetPluginRescanner(mgr)
 	}
+
+	// Server-side run engine: runs trackers on their cadence, caches the latest
+	// result for all clients, and pushes updates over SSE. Presence-gated — it
+	// idles when no client is connected.
+	eng := engine.New(reg, st, logger)
+	eng.Start()
+	defer eng.Stop()
+	srv.SetEngine(eng)
 
 	log.Printf("plugdash listening on %s (db: %s)", *addr, *dbPath)
 	if err := http.ListenAndServe(*addr, srv); err != nil {

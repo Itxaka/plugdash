@@ -23,6 +23,30 @@ type Tracker struct {
 	// tracker. 0 means "use the plugin default".
 	RefreshIntervalSeconds int       `json:"refresh_interval_seconds"`
 	CreatedAt              time.Time `json:"created_at"`
+	// Source is where the tracker came from: "db" for user-created (editable in
+	// the UI) or "file" for declarative config (config-as-code; read-only in the
+	// UI and reconciled from the config file on each load).
+	Source string `json:"source"`
+	// ConfigKey is the stable identity of a file-managed tracker within the
+	// config file. Empty for db trackers. It lets reconcile update in place
+	// (preserving ID and dashboard order) instead of recreating.
+	ConfigKey string `json:"config_key,omitempty"`
+}
+
+// Tracker sources.
+const (
+	SourceDB   = "db"
+	SourceFile = "file"
+)
+
+// FileTracker is one declarative tracker entry loaded from a config file. Key
+// is its stable identity within the file (used to reconcile in place).
+type FileTracker struct {
+	Key                    string
+	PluginID               string
+	Name                   string
+	Config                 map[string]any
+	RefreshIntervalSeconds int
 }
 
 // Store wraps the database handle and provides tracker CRUD.
@@ -58,7 +82,9 @@ CREATE TABLE IF NOT EXISTS trackers (
 	name       TEXT    NOT NULL,
 	config     TEXT    NOT NULL DEFAULT '{}',
 	refresh_interval_seconds INTEGER NOT NULL DEFAULT 0,
-	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	source     TEXT    NOT NULL DEFAULT 'db',
+	config_key TEXT    NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS settings (
 	id   INTEGER PRIMARY KEY CHECK (id = 1),
@@ -71,6 +97,14 @@ CREATE TABLE IF NOT EXISTS settings (
 	// an older version. ADD COLUMN is idempotent here because we check first.
 	if err := s.ensureColumn("trackers", "refresh_interval_seconds",
 		"ALTER TABLE trackers ADD COLUMN refresh_interval_seconds INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trackers", "source",
+		"ALTER TABLE trackers ADD COLUMN source TEXT NOT NULL DEFAULT 'db'"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("trackers", "config_key",
+		"ALTER TABLE trackers ADD COLUMN config_key TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	// Rename trackers created under the old plugin id after it was generalized.
@@ -169,7 +203,7 @@ func (s *Store) UpdateTracker(id int64, name string, config map[string]any, refr
 // GetTracker returns the tracker with the given id, or sql.ErrNoRows.
 func (s *Store) GetTracker(id int64) (*Tracker, error) {
 	row := s.db.QueryRow(
-		`SELECT id, plugin_id, name, config, refresh_interval_seconds, created_at FROM trackers WHERE id = ?`, id,
+		`SELECT id, plugin_id, name, config, refresh_interval_seconds, created_at, source, config_key FROM trackers WHERE id = ?`, id,
 	)
 	return scanTracker(row)
 }
@@ -177,7 +211,7 @@ func (s *Store) GetTracker(id int64) (*Tracker, error) {
 // ListTrackers returns all trackers ordered by creation time.
 func (s *Store) ListTrackers() ([]*Tracker, error) {
 	rows, err := s.db.Query(
-		`SELECT id, plugin_id, name, config, refresh_interval_seconds, created_at FROM trackers ORDER BY created_at ASC, id ASC`,
+		`SELECT id, plugin_id, name, config, refresh_interval_seconds, created_at, source, config_key FROM trackers ORDER BY created_at ASC, id ASC`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list trackers: %w", err)
@@ -211,6 +245,86 @@ func (s *Store) DeleteTracker(id int64) error {
 	return nil
 }
 
+// ReconcileFileTrackers makes the set of source="file" trackers match items
+// exactly: file trackers present in items are upserted by their ConfigKey
+// (updating in place so IDs and dashboard order survive), and file trackers no
+// longer in items are deleted. User-created (source="db") trackers are never
+// touched. It runs in a single transaction. Passing an empty slice removes all
+// file trackers (e.g. when --config is dropped).
+func (s *Store) ReconcileFileTrackers(items []FileTracker) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin reconcile: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Existing file trackers, keyed by config_key.
+	rows, err := tx.Query(`SELECT id, config_key FROM trackers WHERE source = ?`, SourceFile)
+	if err != nil {
+		return fmt.Errorf("load file trackers: %w", err)
+	}
+	existing := map[string]int64{}
+	for rows.Next() {
+		var id int64
+		var key string
+		if err := rows.Scan(&id, &key); err != nil {
+			rows.Close()
+			return err
+		}
+		existing[key] = id
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	seen := make(map[string]bool, len(items))
+	for _, it := range items {
+		cfg := it.Config
+		if cfg == nil {
+			cfg = map[string]any{}
+		}
+		raw, err := json.Marshal(cfg)
+		if err != nil {
+			return fmt.Errorf("marshal config for %q: %w", it.Key, err)
+		}
+		interval := it.RefreshIntervalSeconds
+		if interval < 0 {
+			interval = 0
+		}
+		seen[it.Key] = true
+		if id, ok := existing[it.Key]; ok {
+			if _, err := tx.Exec(
+				`UPDATE trackers SET plugin_id = ?, name = ?, config = ?, refresh_interval_seconds = ? WHERE id = ?`,
+				it.PluginID, it.Name, string(raw), interval, id,
+			); err != nil {
+				return fmt.Errorf("update file tracker %q: %w", it.Key, err)
+			}
+			continue
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO trackers (plugin_id, name, config, refresh_interval_seconds, source, config_key)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			it.PluginID, it.Name, string(raw), interval, SourceFile, it.Key,
+		); err != nil {
+			return fmt.Errorf("insert file tracker %q: %w", it.Key, err)
+		}
+	}
+
+	for key, id := range existing {
+		if !seen[key] {
+			if _, err := tx.Exec(`DELETE FROM trackers WHERE id = ?`, id); err != nil {
+				return fmt.Errorf("delete stale file tracker %q: %w", key, err)
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit reconcile: %w", err)
+	}
+	return nil
+}
+
 // scanner abstracts *sql.Row and *sql.Rows for scanTracker.
 type scanner interface {
 	Scan(dest ...any) error
@@ -222,7 +336,7 @@ func scanTracker(sc scanner) (*Tracker, error) {
 		rawCfg  string
 		created string
 	)
-	if err := sc.Scan(&t.ID, &t.PluginID, &t.Name, &rawCfg, &t.RefreshIntervalSeconds, &created); err != nil {
+	if err := sc.Scan(&t.ID, &t.PluginID, &t.Name, &rawCfg, &t.RefreshIntervalSeconds, &created, &t.Source, &t.ConfigKey); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(rawCfg), &t.Config); err != nil {

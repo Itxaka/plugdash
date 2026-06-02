@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"plugdash/internal/engine"
 	"plugdash/internal/plugin"
 	"plugdash/internal/store"
 )
@@ -44,7 +45,13 @@ type Server struct {
 	logger    *slog.Logger
 	logs      *LogRing
 	level     *slog.LevelVar
+	engine    *engine.Engine // when set, runs are server-driven + cached
 }
+
+// SetEngine wires the server-side run engine. When set, /api/run and
+// /api/trackers/{id}/run serve cached snapshots and /api/stream pushes live
+// updates; without it the server falls back to running trackers per request.
+func (s *Server) SetEngine(e *engine.Engine) { s.engine = e }
 
 // New builds a Server. static is the filesystem containing the frontend assets
 // (typically an embedded web/ directory).
@@ -105,6 +112,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/trackers/{id}", s.handleDeleteTracker)
 	s.mux.HandleFunc("GET /api/trackers/{id}/run", s.handleRunTracker)
 	s.mux.HandleFunc("GET /api/run", s.handleRunAll)
+	s.mux.HandleFunc("GET /api/stream", s.handleStream)
 	s.mux.HandleFunc("GET /api/settings", s.handleGetSettings)
 	s.mux.HandleFunc("PUT /api/settings", s.handleSaveSettings)
 	s.mux.HandleFunc("GET /api/logs", s.handleGetLogs)
@@ -258,7 +266,15 @@ func (s *Server) handleCreateTracker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.reconcileEngine()
 	writeJSON(w, http.StatusCreated, t)
+}
+
+// reconcileEngine refreshes the engine's tracker set after a CRUD change.
+func (s *Server) reconcileEngine() {
+	if s.engine != nil {
+		_ = s.engine.Reconcile()
+	}
 }
 
 func (s *Server) handleUpdateTracker(w http.ResponseWriter, r *http.Request) {
@@ -273,9 +289,13 @@ func (s *Server) handleUpdateTracker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		// Keep the existing name rather than blanking it.
-		if existing, gerr := s.store.GetTracker(id); gerr == nil {
+	if existing, gerr := s.store.GetTracker(id); gerr == nil {
+		if existing.Source == store.SourceFile {
+			writeError(w, http.StatusForbidden, "tracker is managed by config and cannot be edited from the UI")
+			return
+		}
+		if name == "" {
+			// Keep the existing name rather than blanking it.
 			name = existing.Name
 		}
 	}
@@ -288,6 +308,7 @@ func (s *Server) handleUpdateTracker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.reconcileEngine()
 	writeJSON(w, http.StatusOK, t)
 }
 
@@ -295,6 +316,10 @@ func (s *Server) handleDeleteTracker(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if existing, gerr := s.store.GetTracker(id); gerr == nil && existing.Source == store.SourceFile {
+		writeError(w, http.StatusForbidden, "tracker is managed by config and cannot be deleted from the UI")
 		return
 	}
 	if err := s.store.DeleteTracker(id); err != nil {
@@ -305,6 +330,7 @@ func (s *Server) handleDeleteTracker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.reconcileEngine()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -325,6 +351,26 @@ func (s *Server) handleRunTracker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+
+	// Engine path: serve the cached snapshot; ?force=true enqueues an immediate
+	// run (the live result arrives over /api/stream).
+	if s.engine != nil {
+		if r.URL.Query().Get("force") == "true" {
+			s.engine.Force(id)
+		}
+		if snap, ok := s.engine.Snapshot(id); ok {
+			writeJSON(w, http.StatusOK, snap)
+			return
+		}
+		// Not run yet: confirm the tracker exists, then report it's pending.
+		if _, gerr := s.store.GetTracker(id); errors.Is(gerr, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "tracker not found")
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]any{"tracker_id": id, "pending": true})
+		return
+	}
+
 	t, err := s.store.GetTracker(id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -338,12 +384,74 @@ func (s *Server) handleRunTracker(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// handleStream is the SSE endpoint: it pushes cached snapshots immediately on
+// connect, then streams each tracker result as the engine produces it. An open
+// connection counts as a present client, so the engine schedules while at least
+// one stream is connected and idles otherwise.
+func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
+	if s.engine == nil {
+		writeError(w, http.StatusNotImplemented, "live updates not enabled")
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming unsupported")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // disable proxy buffering (nginx)
+
+	ch, unsub := s.engine.Subscribe()
+	defer unsub()
+
+	// A periodic comment keeps the connection alive through idle proxies.
+	ka := time.NewTicker(25 * time.Second)
+	defer ka.Stop()
+
+	_, _ = w.Write([]byte("retry: 3000\n\n"))
+	flusher.Flush()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ka.C:
+			if _, err := w.Write([]byte(": keepalive\n\n")); err != nil {
+				return
+			}
+			flusher.Flush()
+		case frame, open := <-ch:
+			if !open {
+				return
+			}
+			if _, err := w.Write(frame); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
 // handleRunAll runs every configured tracker concurrently and returns their
 // results in a single JSON array. Concurrency is capped so a large number of
 // trackers does not open an unbounded number of goroutines or connections.
 // Results preserve tracker order; per-tracker failures are captured in each
 // runResponse rather than failing the whole request.
 func (s *Server) handleRunAll(w http.ResponseWriter, r *http.Request) {
+	// Engine path: serve the shared cached snapshots (one upstream call serves
+	// every client) instead of running per request.
+	if s.engine != nil {
+		s.engine.Poll() // count this as presence (SSE-fallback pollers)
+		snaps := s.engine.SnapshotAll()
+		if snaps == nil {
+			snaps = []*engine.Snapshot{}
+		}
+		writeJSON(w, http.StatusOK, snaps)
+		return
+	}
+
 	trackers, err := s.store.ListTrackers()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

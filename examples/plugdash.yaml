@@ -1,0 +1,61 @@
+# Example plugdash declarative config ("config-as-code").
+#
+# Run plugdash against this file with:
+#   plugdash --config /path/to/plugdash.yaml
+#
+# Trackers below are reconciled into the database on startup and shown
+# READ-ONLY in the UI (a `config` badge; Edit/Delete are disabled). You can
+# still add your own ad-hoc trackers through the UI — those are independent and
+# fully editable. Removing a tracker from this file (or starting without
+# --config) deletes the file-managed trackers on the next start; user-created
+# trackers are never touched.
+#
+# Unknown keys are rejected (strict parsing), so typos fail loudly at startup.
+
+settings:                          # optional; applied at startup, NOT saved to the DB settings row
+  # Token used to authenticate all GitHub plugins. Exported as GITHUB_TOKEN
+  # only if that env var isn't already set. Prefer an env var or the Settings
+  # UI for secrets rather than committing a real token to source control.
+  github_token: "ghp_replace_me"
+  debug: false                     # optional; enable verbose logging
+
+trackers:
+  # GitHub releases for a repo. `key` is the stable identity used to match this
+  # entry across restarts — editing name/config here updates the existing widget
+  # in place (preserving its dashboard position).
+  - key: k8s-releases              # optional; defaults to slug(name)
+    plugin: github-releases        # REQUIRED: the plugin ID
+    name: Kubernetes releases      # display title (defaults to key if omitted)
+    refresh_interval_seconds: 600  # optional; 0/omitted = plugin default cadence
+    config:                        # plugin-specific configuration
+      repo: kubernetes/kubernetes  # owner/repo to watch
+      count: 5                     # number of releases to show
+      show_prereleases: false      # include pre-releases (RCs, alphas)
+
+  # CI status across one or more repositories. `repos` is a list.
+  - key: ci-status
+    plugin: github-actions-status
+    name: CI status
+    refresh_interval_seconds: 300
+    config:
+      repos:                       # one or more owner/repo entries
+        - golang/go
+        - kubernetes/kubernetes
+
+  # Simple HTTP uptime check. No `key` given here, so it is derived from the
+  # name → "production-api".
+  - plugin: http-health
+    name: Production API
+    refresh_interval_seconds: 60
+    config:
+      url: https://api.example.com/healthz  # endpoint to GET
+      expected_status: 200                  # status code that means "healthy"
+      timeout_seconds: 10                   # request timeout
+
+  # Read the latest items from an RSS/Atom feed.
+  - key: go-blog
+    plugin: rss-feed
+    name: The Go Blog
+    config:                        # no refresh_interval_seconds → plugin default cadence
+      url: https://go.dev/blog/feed.atom  # feed URL (RSS or Atom)
+      count: 5                            # number of items to show

@@ -1077,6 +1077,33 @@ a.list-title:hover {
   white-space: nowrap;
 }
 
+.config-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  white-space: nowrap;
+  cursor: default;
+}
+
+.tracker-name-row,
+.card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.card-title-row .card-title {
+  min-width: 0;
+}
+
 /* ---------- Checklist viz ---------- */
 .checklist-head {
   display: inline-flex;

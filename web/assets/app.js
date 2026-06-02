@@ -79,6 +79,9 @@ const API = {
   deleteTracker: (id) =>
     api(`/api/trackers/${encodeURIComponent(id)}`, { method: "DELETE" }),
   runTracker: (id) => api(`/api/trackers/${encodeURIComponent(id)}/run`),
+  run: () => api("/api/run"),
+  forceTracker: (id) =>
+    api(`/api/trackers/${encodeURIComponent(id)}/run?force=true`),
   rescanPlugins: () => api("/api/plugins/rescan", { method: "POST" }),
   getLogs: () => api("/api/logs"),
   clearLogs: () => api("/api/logs", { method: "DELETE" }),
@@ -91,24 +94,80 @@ const API = {
     }),
 };
 
-/* ---------- settings state + auto-refresh timer ---------- */
+/* ---------- settings + live-stream state ----------
+   Runs are server-driven now: the engine executes trackers on their cadence and
+   pushes results over SSE (/api/stream); one upstream call serves every client,
+   and the engine idles when nobody is connected. The dashboard subscribes while
+   it is the active view and falls back to polling the cached /api/run if SSE is
+   unavailable. */
 let settingsCache = null;
-// One timer per card, each firing at that widget's own effective interval.
-let autoRefreshTimers = [];
-// Catch-up handler run when the tab becomes visible again (browsers throttle /
-// freeze timers in background tabs, so long-interval widgets miss their tick).
-let visibilityHandler = null;
+let streamSource = null; // EventSource
+let pollTimer = null; // cached-poll fallback
+let onSnapshot = null; // current dashboard's snapshot handler
 
 const SETTINGS_DEFAULTS = {
-  autorefresh_enabled: false,
+  autorefresh_enabled: true,
 };
 
-function clearAutoRefresh() {
-  for (const t of autoRefreshTimers) clearInterval(t);
-  autoRefreshTimers = [];
-  if (visibilityHandler) {
-    document.removeEventListener("visibilitychange", visibilityHandler);
-    visibilityHandler = null;
+// stopUpdates tears down any live stream / poll loop (called when leaving the
+// dashboard view so the engine can notice the client left and idle).
+function stopUpdates() {
+  if (streamSource) {
+    streamSource.close();
+    streamSource = null;
+  }
+  if (pollTimer != null) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  onSnapshot = null;
+}
+
+// startUpdates subscribes to the live SSE stream and dispatches each snapshot to
+// `handler`. If SSE errors/aborts it falls back to polling the cached /api/run
+// (which also keeps the engine marked as watched). `handler(snapshot)` receives
+// the same shape as a /api/run array element.
+function startUpdates(handler) {
+  stopUpdates();
+  onSnapshot = handler;
+
+  let usingPoll = false;
+  const startPoll = () => {
+    if (usingPoll) return;
+    usingPoll = true;
+    const poll = async () => {
+      try {
+        const snaps = await API.run();
+        if (onSnapshot) for (const s of snaps) onSnapshot(s);
+      } catch (e) {
+        /* transient */
+      }
+    };
+    poll();
+    pollTimer = setInterval(poll, 8000);
+  };
+
+  try {
+    const es = new EventSource("/api/stream");
+    streamSource = es;
+    es.addEventListener("snapshot", (ev) => {
+      try {
+        if (onSnapshot) onSnapshot(JSON.parse(ev.data));
+      } catch (e) {
+        /* ignore malformed frame */
+      }
+    });
+    es.onerror = () => {
+      // EventSource auto-reconnects; if it can't, switch to polling so the
+      // dashboard still updates (and the engine still sees a watcher).
+      if (es.readyState === EventSource.CLOSED) {
+        es.close();
+        if (streamSource === es) streamSource = null;
+        startPoll();
+      }
+    };
+  } catch (e) {
+    startPoll(); // browser without EventSource
   }
 }
 
@@ -118,55 +177,6 @@ function clearLogsTimer() {
   if (logsTimer != null) {
     clearInterval(logsTimer);
     logsTimer = null;
-  }
-}
-
-/* ---------- widget result cache (localStorage) ----------
-   Each widget's last run result is cached with a timestamp and a signature of
-   the tracker (plugin + config + interval). On reload we reuse the cache while
-   it is younger than the widget's refresh interval, so hitting F5 does not
-   re-query external APIs for slow widgets (e.g. daily release checks). A config
-   edit changes the signature, invalidating the cache automatically. */
-function widgetSig(tracker) {
-  return JSON.stringify([
-    tracker.plugin_id,
-    tracker.config || {},
-    tracker.refresh_interval_seconds || 0,
-  ]);
-}
-
-function widgetCacheKey(id) {
-  return "plugdash:w:" + id;
-}
-
-function loadWidgetCache(tracker) {
-  try {
-    const raw = localStorage.getItem(widgetCacheKey(tracker.id));
-    if (!raw) return null;
-    const entry = JSON.parse(raw);
-    if (!entry || entry.sig !== widgetSig(tracker)) return null;
-    return entry; // {sig, res, at}
-  } catch (e) {
-    return null;
-  }
-}
-
-function saveWidgetCache(tracker, res) {
-  try {
-    localStorage.setItem(
-      widgetCacheKey(tracker.id),
-      JSON.stringify({ sig: widgetSig(tracker), res, at: Date.now() })
-    );
-  } catch (e) {
-    /* quota or unavailable — caching is best-effort */
-  }
-}
-
-function clearWidgetCache(id) {
-  try {
-    localStorage.removeItem(widgetCacheKey(id));
-  } catch (e) {
-    /* ignore */
   }
 }
 
@@ -525,7 +535,7 @@ function renderRaw(data) {
    ============================================================ */
 async function renderDashboard() {
   clear(main);
-  clearAutoRefresh();
+  stopUpdates();
 
   if (!settingsCache) {
     try {
@@ -535,147 +545,79 @@ async function renderDashboard() {
     }
   }
 
-  // Slim toolbar (no big title text): compact controls, right-aligned.
-  const refreshBtn = el("button", {
-    class: "icon-btn",
-    title: "Refresh all now",
-    text: "↻",
-  });
+  // Slim toolbar: refresh-all, edit mode, live toggle.
+  const refreshBtn = el("button", { class: "icon-btn", title: "Refresh all now", text: "↻" });
 
-  const editToggle = el("button", {
-    class: "icon-btn",
-    title: "Edit mode — edit/delete widgets",
-    text: "✎",
-  });
+  const editToggle = el("button", { class: "icon-btn", title: "Edit mode — edit/delete widgets", text: "✎" });
   editToggle.addEventListener("click", () => {
     const on = main.classList.toggle("editing");
     editToggle.classList.toggle("active", on);
   });
 
-  // Auto-refresh toggle switch. Each widget refreshes on its own cadence.
-  const toggle = el("input", { type: "checkbox" });
-  toggle.checked = !!settingsCache.autorefresh_enabled;
-  const toggleWrap = el("label", { class: "switch switch-sm", title: "Auto-refresh (each widget on its own cadence)" }, [
-    toggle,
+  // Live: subscribe to server pushes while viewing (and count as a present
+  // viewer so the engine runs). Off → show the last cached snapshot, frozen.
+  const live = el("input", { type: "checkbox" });
+  live.checked = settingsCache.autorefresh_enabled !== false;
+  const liveWrap = el("label", { class: "switch switch-sm", title: "Live updates (server pushes results while viewing)" }, [
+    live,
     el("span", { class: "switch-track" }, el("span", { class: "switch-thumb" })),
-    el("span", { class: "switch-label", text: "Auto" }),
+    el("span", { class: "switch-label", text: "Live" }),
   ]);
 
-  const toolbar = el("div", { class: "dash-toolbar" }, [
-    toggleWrap,
-    editToggle,
-    refreshBtn,
-  ]);
-  main.appendChild(toolbar);
+  main.appendChild(el("div", { class: "dash-toolbar" }, [liveWrap, editToggle, refreshBtn]));
 
   const body = el("div");
   main.appendChild(body);
 
-  let loading = false;
-  let cardStates = [];
+  const byId = new Map(); // tracker id -> { tracker, card }
 
-  // Arm one timer per widget at its own effective interval (the tracker's
-  // override, or the plugin's declared default). Cheap/volatile widgets refresh
-  // often; slow/expensive ones rarely — no single global tick.
-  function armAutoRefresh() {
-    clearAutoRefresh();
-    if (!(settingsCache && settingsCache.autorefresh_enabled)) return;
-    for (const s of cardStates) {
-      const secs = s.intervalSec || 0;
-      if (secs > 0) {
-        autoRefreshTimers.push(setInterval(() => refreshCard(s, true), secs * 1000));
-      }
-    }
-    // Background tabs throttle/freeze timers, so a long-interval widget can miss
-    // its tick entirely. When the tab becomes visible again, refresh any widget
-    // whose interval has elapsed (refreshCard with force=false is gated by it).
-    visibilityHandler = () => {
-      if (document.visibilityState !== "visible") return;
-      for (const s of cardStates) refreshCard(s, false);
-    };
-    document.addEventListener("visibilitychange", visibilityHandler);
+  function applySnapshot(snap) {
+    if (!snap || snap.tracker_id == null) return;
+    const st = byId.get(snap.tracker_id);
+    if (!st) return;
+    const at = snap.fetched_at ? Date.parse(snap.fetched_at) : Date.now();
+    fillCard(st.card, st.tracker, snap, snap.refresh_interval_seconds, at);
   }
 
-  // refreshCard re-runs a single widget. When force is false it is skipped if
-  // the widget's own interval has not elapsed since its last run.
-  async function refreshCard(state, force) {
-    if (state.running) return; // don't overlap a run with its own timer
-    const now = Date.now();
-    if (
-      !force &&
-      state.intervalSec > 0 &&
-      now - state.lastRun < state.intervalSec * 1000
-    ) {
-      return;
-    }
-    state.running = true;
-    const { card, tracker } = state;
-    card.root.classList.add("is-loading");
-    if (card.refreshBtn) card.refreshBtn.disabled = true;
+  async function hydrateOnce() {
     try {
-      const res = await API.runTracker(tracker.id);
-      if (
-        typeof res.refresh_interval_seconds === "number" &&
-        res.refresh_interval_seconds > 0
-      ) {
-        state.intervalSec = res.refresh_interval_seconds;
-      }
-      fillCard(card, tracker, res, state.intervalSec);
-      saveWidgetCache(tracker, res); // cache fresh result for fast reloads
+      const snaps = await API.run();
+      for (const s of snaps) applySnapshot(s);
     } catch (e) {
-      fillCardError(card, tracker, e.message || String(e), state.intervalSec);
-    } finally {
-      state.lastRun = Date.now();
-      state.running = false;
-      if (card.refreshBtn) card.refreshBtn.disabled = false;
+      /* ignore */
     }
   }
 
-  toggle.addEventListener("change", async () => {
-    settingsCache.autorefresh_enabled = toggle.checked;
-    armAutoRefresh();
+  function connect() {
+    if (live.checked) startUpdates(applySnapshot);
+    else {
+      stopUpdates();
+      hydrateOnce();
+    }
+  }
+
+  live.addEventListener("change", async () => {
+    settingsCache.autorefresh_enabled = live.checked;
+    connect();
     try {
       settingsCache = await API.saveSettings(settingsCache);
-      toggle.checked = !!settingsCache.autorefresh_enabled;
     } catch (e) {
-      // Revert on failure.
-      settingsCache.autorefresh_enabled = !toggle.checked;
-      toggle.checked = settingsCache.autorefresh_enabled;
-      armAutoRefresh();
-      alert("Failed to save setting: " + (e.message || e));
+      /* non-fatal */
     }
   });
 
-  async function load(force) {
-    if (loading) return;
-    loading = true;
-    try {
-      await doLoad(!!force);
-    } finally {
-      loading = false;
-    }
+  function forceOne(t, card) {
+    card.root.classList.add("is-loading");
+    API.forceTracker(t.id).catch((e) => fillCardError(card, t, e.message || String(e)));
+    if (!live.checked) setTimeout(hydrateOnce, 1500);
   }
 
-  // hydrateOrRefresh renders a widget from cache when it is still fresh
-  // (younger than its interval), otherwise runs it. This is what spares the
-  // external APIs on page reloads.
-  async function hydrateOrRefresh(state) {
-    const cached = loadWidgetCache(state.tracker);
-    if (cached && cached.res) {
-      state.intervalSec = Number(cached.res.refresh_interval_seconds) || 0;
-      state.lastRun = cached.at || 0;
-      fillCard(state.card, state.tracker, cached.res, state.intervalSec, cached.at);
-      const age = Date.now() - (cached.at || 0);
-      if (state.intervalSec > 0 && age < state.intervalSec * 1000) {
-        return; // still fresh — no network call
-      }
-    }
-    return refreshCard(state, true);
-  }
+  refreshBtn.addEventListener("click", () => {
+    for (const st of byId.values()) forceOne(st.tracker, st.card);
+  });
 
-  async function doLoad(force) {
+  async function build() {
     clear(body);
-    refreshBtn.disabled = true;
     body.appendChild(el("div", { class: "loading-text", text: "Loading trackers…" }));
 
     let trackers;
@@ -683,49 +625,35 @@ async function renderDashboard() {
       trackers = await API.trackers();
     } catch (e) {
       clear(body);
-      body.appendChild(
-        el("div", { class: "empty" }, [
-          el("strong", { text: "Could not load trackers" }),
-          el("span", { text: String(e.message || e) }),
-        ])
-      );
-      refreshBtn.disabled = false;
+      body.appendChild(el("div", { class: "empty" }, [
+        el("strong", { text: "Could not load trackers" }),
+        el("span", { text: String(e.message || e) }),
+      ]));
       return;
     }
 
     clear(body);
-
     if (!trackers || !trackers.length) {
-      body.appendChild(
-        el("div", { class: "empty" }, [
-          el("strong", { text: "No trackers yet" }),
-          el("span", {
-            text: "Head to Configure to add your first tracker.",
-          }),
-        ])
-      );
-      refreshBtn.disabled = false;
+      body.appendChild(el("div", { class: "empty" }, [
+        el("strong", { text: "No trackers yet" }),
+        el("span", { text: "Head to Trackers to add your first widget." }),
+      ]));
       return;
     }
 
     const grid = el("div", { class: "grid" });
     body.appendChild(grid);
 
-    // apply saved drag order
-    const ordered = orderTrackers(
-      trackers,
-      settingsCache && settingsCache.dashboard_order
-    );
-
-    // build one card + state per tracker; wire its force-refresh button
-    cardStates = [];
+    const ordered = orderTrackers(trackers, settingsCache && settingsCache.dashboard_order);
+    byId.clear();
     for (const t of ordered) {
       const card = buildCardShell(t);
       wireCardDrag(card.root, grid);
       grid.appendChild(card.root);
-      const state = { tracker: t, card, intervalSec: 0, lastRun: 0 };
+      byId.set(t.id, { tracker: t, card });
+
       if (card.refreshBtn) {
-        card.refreshBtn.addEventListener("click", () => refreshCard(state, true));
+        card.refreshBtn.addEventListener("click", () => forceOne(t, card));
       }
       if (card.editBtn) {
         card.editBtn.addEventListener("click", () => {
@@ -738,14 +666,13 @@ async function renderDashboard() {
           if (!confirm(`Delete widget "${t.name || t.plugin_id}"?`)) return;
           try {
             await API.deleteTracker(t.id);
-            clearWidgetCache(t.id);
-            await load(false);
+            await build();
+            connect();
           } catch (e) {
             alert("Delete failed: " + (e.message || e));
           }
         });
       }
-      cardStates.push(state);
     }
 
     grid.addEventListener("dragover", (e) => {
@@ -758,23 +685,14 @@ async function renderDashboard() {
       if (after == null) grid.appendChild(dragging);
       else if (after !== dragging) grid.insertBefore(dragging, after);
     });
-
-    // Run every widget. A manual Refresh forces a fresh run; a normal load
-    // (page open / F5 / view switch) hydrates from cache when still fresh.
-    await Promise.all(
-      cardStates.map((s) => (force ? refreshCard(s, true) : hydrateOrRefresh(s)))
-    );
-
-    refreshBtn.disabled = false;
   }
 
-  refreshBtn.addEventListener("click", () => load(true));
-  await load(false);
-  armAutoRefresh();
+  await build();
+  connect();
 }
 
-// iconFor maps a plugin id to a glyph + accent color for the card badge, giving
-// each widget type instant visual identity.
+// iconFor maps a plugin id to a glyph + accent color. The glyph is used in the
+// plugin dropdown (text-only <option>); cards use svgFor() for crisp SVG icons.
 function iconFor(pluginId) {
   const map = {
     "github-releases": { g: "🏷️", c: "#a371f7" },
@@ -792,9 +710,8 @@ function iconFor(pluginId) {
   return map[pluginId] || { g: "🧩", c: "#9aa4b1" };
 }
 
-// Inline line-icons (Lucide-ish) per plugin type. Unlike emoji these center
-// perfectly in the badge and inherit the type colour via currentColor. The
-// dropdown still uses iconFor()'s emoji since <option> can't hold markup.
+// Inline line-icons per plugin type — center perfectly and inherit the type
+// color via currentColor.
 const ICON_SVG = {
   "github-releases": '<path d="M3 3h7l11 11-7 7L3 10z"/><circle cx="7.5" cy="7.5" r="1.4" fill="currentColor" stroke="none"/>',
   "github-release-artifacts": '<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>',
@@ -826,12 +743,21 @@ function buildCardShell(tracker) {
   iconEl.style.background = ic.c + "22";
   iconEl.style.boxShadow = "inset 0 0 0 1px " + ic.c + "44";
 
+  const isFile = tracker.source === "file";
   const titleEl = el("div", {
     class: "card-title",
     text: tracker.name || "Tracker",
   });
+  const configBadge = isFile
+    ? el("span", {
+        class: "config-badge",
+        text: "config",
+        title: "Managed by config file (read-only)",
+      })
+    : null;
+  const titleRow = el("div", { class: "card-title-row" }, [titleEl, configBadge]);
   const subtitleEl = el("div", { class: "card-subtitle" });
-  const titleWrap = el("div", { class: "card-titles" }, [titleEl, subtitleEl]);
+  const titleWrap = el("div", { class: "card-titles" }, [titleRow, subtitleEl]);
   const handle = el("div", {
     class: "card-handle",
     title: "Drag to reorder",
@@ -839,8 +765,8 @@ function buildCardShell(tracker) {
   });
 
   // Edit-mode actions (hidden unless the dashboard is in edit mode).
-  const editBtn = el("button", { class: "card-act", title: "Edit widget", text: "✎" });
-  const deleteBtn = el("button", { class: "card-act danger", title: "Delete widget", text: "✕" });
+  const editBtn = isFile ? null : el("button", { class: "card-act", title: "Edit widget", text: "✎" });
+  const deleteBtn = isFile ? null : el("button", { class: "card-act danger", title: "Delete widget", text: "✕" });
   const actionsEl = el("div", { class: "card-actions" }, [editBtn, deleteBtn]);
   const bodyEl = el("div", { class: "card-body" }, [
     el("div", { class: "skeleton", text: "Running…" }),
@@ -1081,31 +1007,43 @@ async function renderConfigure() {
       const plugin = pluginById[t.plugin_id];
       const pluginName = (plugin && plugin.name) || t.plugin_id || "unknown plugin";
 
-      const editBtn = el("button", {
-        class: "btn btn-ghost btn-sm",
-        text: "Edit",
-      });
-      editBtn.addEventListener("click", () => {
-        buildForm(formPanel, plugins, afterChange, t);
-        formPanel.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
+      const isFile = t.source === "file";
+      let editBtn = null;
+      let delBtn = null;
+      if (!isFile) {
+        editBtn = el("button", {
+          class: "btn btn-ghost btn-sm",
+          text: "Edit",
+        });
+        editBtn.addEventListener("click", () => {
+          buildForm(formPanel, plugins, afterChange, t);
+          formPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
 
-      const delBtn = el("button", {
-        class: "btn btn-danger btn-sm",
-        text: "Delete",
-      });
-      delBtn.addEventListener("click", async () => {
-        delBtn.disabled = true;
-        delBtn.textContent = "Deleting…";
-        try {
-          await API.deleteTracker(t.id);
-          await afterChange();
-        } catch (e) {
-          delBtn.disabled = false;
-          delBtn.textContent = "Delete";
-          alert("Delete failed: " + (e.message || e));
-        }
-      });
+        delBtn = el("button", {
+          class: "btn btn-danger btn-sm",
+          text: "Delete",
+        });
+        delBtn.addEventListener("click", async () => {
+          delBtn.disabled = true;
+          delBtn.textContent = "Deleting…";
+          try {
+            await API.deleteTracker(t.id);
+            await afterChange();
+          } catch (e) {
+            delBtn.disabled = false;
+            delBtn.textContent = "Delete";
+            alert("Delete failed: " + (e.message || e));
+          }
+        });
+      }
+      const configBadge = isFile
+        ? el("span", {
+            class: "config-badge",
+            text: "config",
+            title: "Managed by config file (read-only)",
+          })
+        : null;
       const ic = iconFor(t.plugin_id);
       const trIcon = el("div", { class: "card-icon tracker-icon", html: svgFor(t.plugin_id) });
       trIcon.style.color = ic.c;
@@ -1115,7 +1053,10 @@ async function renderConfigure() {
         el("div", { class: "tracker-row" }, [
           trIcon,
           el("div", { class: "tracker-info" }, [
-            el("div", { class: "tracker-name", text: t.name || "(unnamed)" }),
+            el("div", { class: "tracker-name-row" }, [
+              el("span", { class: "tracker-name", text: t.name || "(unnamed)" }),
+              configBadge,
+            ]),
             el("div", { class: "tracker-meta", text: pluginName }),
           ]),
           el("div", { class: "tracker-actions" }, [editBtn, delBtn]),
@@ -1878,7 +1819,7 @@ function setView(view) {
   currentView = view;
   if (location.hash.slice(1) !== view) location.hash = view; // deep-linkable
   main.className = "main view-" + view; // lets CSS widen the dashboard, narrow forms
-  clearAutoRefresh();
+  stopUpdates();
   clearLogsTimer();
   for (const btn of nav.querySelectorAll(".nav-btn")) {
     btn.classList.toggle("active", btn.dataset.view === view);

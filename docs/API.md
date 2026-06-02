@@ -5,6 +5,25 @@ data source (e.g. GitHub releases, star history). A **tracker** is a saved insta
 plugin together with the configuration a user supplied for it; running a tracker produces
 a widget on the dashboard.
 
+**Server-side run engine.** When the run engine is enabled, plugdash does not run trackers
+once per HTTP request. Instead the server schedules runs centrally, caches the latest
+**snapshot** for each tracker, and shares it with every client. In this mode:
+
+- `GET /api/stream` opens a Server-Sent Events (SSE) channel that replays the current
+  snapshots on connect and then pushes a fresh one each time a tracker re-runs.
+- `GET /api/run` and `GET /api/trackers/{id}/run` serve the cached snapshots rather than
+  triggering fresh upstream calls.
+- An open SSE connection (and, as a fallback, a poll of `GET /api/run`) counts as client
+  **presence**. The engine only schedules work while at least one client is present and
+  idles otherwise, so a dashboard nobody is watching stops hitting upstream APIs.
+
+If the engine is not enabled, the server falls back to the per-request behavior described
+inline for each endpoint, and `GET /api/stream` returns `501 Not Implemented`.
+
+**Config-as-code.** Trackers can either be user-created in the UI (editable) or declared in
+a config file and reconciled into the database on load (read-only). Each tracker object
+reports this via its `source` field; see the tracker schema below.
+
 ## Conventions
 
 - **Base URL:** `http://localhost:8080` (the host/port plugdash is bound to). All paths
@@ -29,8 +48,9 @@ a widget on the dashboard.
 | POST | `/api/trackers` | Create a tracker |
 | PUT | `/api/trackers/{id}` | Update a tracker's name, config, and refresh interval |
 | DELETE | `/api/trackers/{id}` | Delete a tracker |
-| GET | `/api/trackers/{id}/run` | Run a single tracker and return its result |
-| GET | `/api/run` | Run all trackers concurrently and return their results |
+| GET | `/api/trackers/{id}/run` | Get a single tracker's cached snapshot (`?force=true` to re-run) |
+| GET | `/api/run` | Get all trackers' cached snapshots as an array |
+| GET | `/api/stream` | Server-Sent Events stream of tracker snapshots |
 | GET | `/api/settings` | Get dashboard-wide settings |
 | PUT | `/api/settings` | Save dashboard-wide settings |
 | GET | `/api/logs` | Get captured log entries and debug state |
@@ -170,7 +190,8 @@ A tracker object has the following shape:
   "name": "Kubernetes releases",
   "config": { "repos": ["kubernetes/kubernetes"] },
   "refresh_interval_seconds": 0,
-  "created_at": "2026-06-02T10:15:00Z"
+  "created_at": "2026-06-02T10:15:00Z",
+  "source": "db"
 }
 ```
 
@@ -182,6 +203,8 @@ A tracker object has the following shape:
 | `config` | object | Arbitrary JSON object of config keys matching the plugin's schema. |
 | `refresh_interval_seconds` | number | Per-tracker override of the plugin's default cadence. `0` means "use the plugin default". |
 | `created_at` | string | RFC3339 creation timestamp. |
+| `source` | string | Where the tracker came from: `"db"` for a user-created tracker (editable and deletable via the API/UI) or `"file"` for a config-managed tracker (declared in the config file, reconciled on load, and read-only — see `PUT`/`DELETE` below). |
+| `config_key` | string | Stable identity of a file-managed tracker within the config file, used to reconcile it in place across reloads. Present only when `source` is `"file"`; omitted for `"db"` trackers. |
 
 ### GET /api/trackers
 
@@ -241,6 +264,9 @@ Updates an existing tracker's `name`, `config`, and `refresh_interval_seconds`. 
 `plugin_id` is immutable and cannot be changed (changing it would invalidate the stored
 config against a different schema).
 
+Config-managed trackers (`source: "file"`) are read-only: this endpoint returns
+`403 Forbidden` for them. Only `source: "db"` trackers can be updated.
+
 **Path parameters:** `id` — integer tracker ID.
 
 **Request body:** Same shape as create. `plugin_id` in the body is ignored. If `name` is
@@ -262,6 +288,7 @@ empty/omitted, the existing name is preserved.
 | ------ | ---- | ---- |
 | `400 Bad Request` | `id` is not an integer. | `{"error": "invalid id"}` |
 | `400 Bad Request` | Body is not valid JSON. | `{"error": "invalid JSON body"}` |
+| `403 Forbidden` | The tracker's `source` is `"file"` (config-managed, cannot be edited from the UI). | `{"error": "tracker is managed by config and cannot be edited from the UI"}` |
 | `404 Not Found` | No tracker with that `id`. | `{"error": "tracker not found"}` |
 | `500 Internal Server Error` | Database write failed. | `{"error": "<message>"}` |
 
@@ -269,7 +296,8 @@ empty/omitted, the existing name is preserved.
 
 ### DELETE /api/trackers/{id}
 
-Deletes a tracker.
+Deletes a tracker. Config-managed trackers (`source: "file"`) cannot be deleted via the API
+and return `403 Forbidden`; only `source: "db"` trackers can be deleted.
 
 **Path parameters:** `id` — integer tracker ID.
 
@@ -282,6 +310,7 @@ Deletes a tracker.
 | Status | When | Body |
 | ------ | ---- | ---- |
 | `400 Bad Request` | `id` is not an integer. | `{"error": "invalid id"}` |
+| `403 Forbidden` | The tracker's `source` is `"file"` (config-managed, cannot be deleted from the UI). | `{"error": "tracker is managed by config and cannot be deleted from the UI"}` |
 | `404 Not Found` | No tracker with that `id`. | `{"error": "tracker not found"}` |
 | `500 Internal Server Error` | Database delete failed. | `{"error": "<message>"}` |
 
@@ -289,8 +318,8 @@ Deletes a tracker.
 
 ## Running trackers
 
-A **run response** object carries either a plugin `result` or an `error` string for a single
-tracker run:
+A **run response** (also called a **snapshot** when served from the engine's cache) carries
+either a plugin `result` or an `error` string for a single tracker run:
 
 | Field | Type | Description |
 | ----- | ---- | ----------- |
@@ -300,6 +329,7 @@ tracker run:
 | `refresh_interval_seconds` | number | Effective cadence: the tracker's override if set (> 0), otherwise the plugin default. |
 | `result` | object | The plugin `Result` (see below). Omitted when the run failed. |
 | `error` | string | Failure message. Omitted when the run succeeded. |
+| `fetched_at` | string | RFC3339 timestamp of when this snapshot was produced. Present only on cached snapshots served by the engine (`/api/stream`, and the engine-backed `/api/run` and `/api/trackers/{id}/run`); absent from per-request run responses when the engine is disabled. |
 
 **Plugin `Result` object:**
 
@@ -331,15 +361,24 @@ Each run is executed with a 30-second timeout.
 
 ### GET /api/trackers/{id}/run
 
-Runs a single tracker and returns its result.
+Returns the cached snapshot for a single tracker.
+
+When the engine is enabled, this serves the engine's cached snapshot rather than running the
+tracker on the spot. Pass `?force=true` to force an immediate run of the tracker regardless
+of presence or its refresh interval (this is what the per-widget refresh button uses); the
+forced run's snapshot is then returned. When the engine is disabled, the tracker is run
+per-request and the fresh result is returned (no `fetched_at` field).
 
 **Path parameters:** `id` — integer tracker ID.
 
+**Query parameters:** `force` — set to `true` to force an immediate run before returning the
+snapshot. Only effective when the engine is enabled.
+
 **Request:** No body.
 
-**Response `200 OK`:** A single run response object.
+**Response `200 OK`:** A single snapshot object.
 
-Success example:
+Success example (engine-backed, note the `fetched_at`):
 
 ```json
 {
@@ -351,7 +390,8 @@ Success example:
     "visualization": "list",
     "title": "Latest releases",
     "data": { "items": [{ "title": "v1.33.0", "subtitle": "kubernetes/kubernetes", "url": "https://github.com/kubernetes/kubernetes/releases/tag/v1.33.0", "timestamp": "2026-05-20T00:00:00Z" }] }
-  }
+  },
+  "fetched_at": "2026-06-02T10:15:00Z"
 }
 ```
 
@@ -363,8 +403,17 @@ Failure example (note: still `200 OK`):
   "name": "Kubernetes releases",
   "plugin_id": "github-releases",
   "refresh_interval_seconds": 900,
-  "error": "github api: 403 rate limit exceeded"
+  "error": "github api: 403 rate limit exceeded",
+  "fetched_at": "2026-06-02T10:15:00Z"
 }
+```
+
+**Response `202 Accepted`:** The tracker exists but the engine has not produced a snapshot for
+it yet (it has not run since startup). The body reports the pending state; poll again, or
+watch `/api/stream`, to receive the snapshot once it is ready.
+
+```json
+{ "tracker_id": 1, "pending": true }
 ```
 
 **Error responses:**
@@ -373,20 +422,30 @@ Failure example (note: still `200 OK`):
 | ------ | ---- | ---- |
 | `400 Bad Request` | `id` is not an integer. | `{"error": "invalid id"}` |
 | `404 Not Found` | No tracker with that `id`. | `{"error": "tracker not found"}` |
-| `500 Internal Server Error` | Database read failed. | `{"error": "<message>"}` |
+| `500 Internal Server Error` | Database read failed (engine-disabled path). | `{"error": "<message>"}` |
 
 ---
 
 ### GET /api/run
 
-Runs every configured tracker concurrently (capped at 8 at a time) and returns their run
-responses in a single JSON array. Results preserve tracker order. Per-tracker failures are
-captured in each object's `error` field rather than failing the whole request.
+Returns the engine's cached snapshots as a single JSON array, in tracker order.
+
+When the engine is enabled this **serves the cache** — it does not itself trigger fresh
+upstream calls. Trackers that have not produced a snapshot yet are omitted from the array, so
+the result is `[]` until the first runs complete. Calling this endpoint also records a
+cached-poll **presence** tick, which keeps the engine scheduling for a short window (~20s) on
+behalf of clients that cannot use SSE; poll it on an interval to keep the dashboard fresh
+without an open stream.
+
+When the engine is disabled, this falls back to running every configured tracker concurrently
+(capped at 8 at a time) and returning their run responses (without `fetched_at`). In both
+modes results preserve tracker order and per-tracker failures are captured in each object's
+`error` field rather than failing the whole request.
 
 **Request:** No body.
 
-**Response `200 OK`:** A JSON array of run response objects (one per tracker, empty array
-`[]` when no trackers exist).
+**Response `200 OK`:** A JSON array of snapshot objects (empty array `[]` when nothing has run
+yet, or when no trackers exist).
 
 ```json
 [
@@ -395,14 +454,16 @@ captured in each object's `error` field rather than failing the whole request.
     "name": "Kubernetes releases",
     "plugin_id": "github-releases",
     "refresh_interval_seconds": 900,
-    "result": { "visualization": "list", "title": "Latest releases", "data": { "items": [] } }
+    "result": { "visualization": "list", "title": "Latest releases", "data": { "items": [] } },
+    "fetched_at": "2026-06-02T10:15:00Z"
   },
   {
     "tracker_id": 2,
     "name": "Repo stars",
     "plugin_id": "github-activity",
     "refresh_interval_seconds": 3600,
-    "error": "config: repos is required"
+    "error": "config: repos is required",
+    "fetched_at": "2026-06-02T10:15:02Z"
   }
 ]
 ```
@@ -411,7 +472,52 @@ captured in each object's `error` field rather than failing the whole request.
 
 | Status | When | Body |
 | ------ | ---- | ---- |
-| `500 Internal Server Error` | Listing trackers from the database failed. | `{"error": "<message>"}` |
+| `500 Internal Server Error` | Listing trackers from the database failed (engine-disabled path). | `{"error": "<message>"}` |
+
+---
+
+### GET /api/stream
+
+Opens a [Server-Sent Events](https://developer.mozilla.org/docs/Web/API/Server-sent_events)
+stream of tracker snapshots. The frontend uses this for live updates: on connect the server
+**replays the current cached snapshot for every tracker**, and thereafter it pushes a fresh
+`snapshot` event each time a tracker re-runs. An open connection counts as client
+**presence**, so subscribing is what drives the engine to schedule runs; the engine idles
+when no stream is connected.
+
+**Request:** No body. The response is a long-lived `text/event-stream` connection (not JSON),
+so use an `EventSource` or a streaming HTTP client rather than a one-shot request.
+
+**Response `200 OK`:** `Content-Type: text/event-stream`. The server first sends a `retry`
+directive, then a `snapshot` event per already-cached tracker, then additional `snapshot`
+events as runs complete. A `: keepalive` comment line is emitted roughly every 25 seconds to
+hold the connection open through idle proxies.
+
+Each snapshot is delivered as one SSE frame:
+
+```
+event: snapshot
+data: {"tracker_id":1,"name":"Kubernetes releases","plugin_id":"github-releases","refresh_interval_seconds":900,"result":{"visualization":"list","title":"Latest releases","data":{"items":[]}},"fetched_at":"2026-06-02T10:15:00Z"}
+
+```
+
+(The blank line terminating the frame is significant per the SSE spec.) The `data` payload is
+a snapshot object with the same shape as `GET /api/run`'s array elements — `result` is present
+on success and omitted on error; `error` is present on failure and omitted on success.
+
+A keepalive comment looks like:
+
+```
+: keepalive
+
+```
+
+**Error responses:**
+
+| Status | When | Body |
+| ------ | ---- | ---- |
+| `501 Not Implemented` | The run engine is not enabled. | `{"error": "live updates not enabled"}` |
+| `500 Internal Server Error` | The underlying connection does not support streaming/flushing. | `{"error": "streaming unsupported"}` |
 
 ---
 
@@ -570,16 +676,28 @@ curl -X POST http://localhost:8080/api/trackers \
   }'
 ```
 
-Run a single tracker (assuming it got id 1):
+Get a single tracker's cached snapshot (assuming it got id 1):
 
 ```bash
 curl http://localhost:8080/api/trackers/1/run
 ```
 
-Run all trackers:
+Force an immediate re-run of a single tracker (the per-widget refresh button):
+
+```bash
+curl 'http://localhost:8080/api/trackers/1/run?force=true'
+```
+
+Get all cached snapshots:
 
 ```bash
 curl http://localhost:8080/api/run
+```
+
+Watch the live snapshot stream:
+
+```bash
+curl -N http://localhost:8080/api/stream
 ```
 
 Set the GitHub token (and enable auto-refresh):

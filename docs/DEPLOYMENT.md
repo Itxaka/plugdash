@@ -118,6 +118,48 @@ docker run -d --name plugdash \
   plugdash
 ```
 
+## Deploying with a config file
+
+You can manage trackers declaratively ("config-as-code") by pointing `--config`
+at a YAML file. Trackers defined there are reconciled into the database and shown
+read-only in the UI (a `config` badge, with edit/delete disabled); users can
+still add their own trackers through the UI. See
+[CONFIGURATION.md](CONFIGURATION.md) for the schema and `examples/plugdash.yaml`
+for a sample.
+
+Mount the file into the container and point `--config` at it:
+
+```sh
+docker run -d --name plugdash \
+  -p 8080:8080 \
+  -v plugdash-data:/data \
+  -v ./plugdash.yaml:/etc/plugdash.yaml:ro \
+  plugdash \
+  -addr :8080 -db /data/plugdash.db -config /etc/plugdash.yaml
+```
+
+Or in `docker-compose.yml`:
+
+```yaml
+services:
+  plugdash:
+    image: ghcr.io/<owner>/plugdash:latest
+    command: ["-addr", ":8080", "-db", "/data/plugdash.db", "-config", "/etc/plugdash.yaml"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - plugdash-data:/data
+      - ./plugdash.yaml:/etc/plugdash.yaml:ro
+    environment:
+      - GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+volumes:
+  plugdash-data:
+```
+
+A **GitHub token** can live in the config file's `settings` block (`github_token`)
+or be supplied via the `GITHUB_TOKEN` environment variable — whichever you prefer
+for keeping secrets out of the YAML.
+
 ## Behind a reverse proxy
 
 plugdash has **no built-in authentication or authorization**. Anyone who can
@@ -147,6 +189,33 @@ location / {
     proxy_set_header     X-Forwarded-Proto $scheme;
 }
 ```
+
+### Server-Sent Events (`/api/stream`)
+
+Live updates are delivered over a **long-lived streaming response** at
+`/api/stream`. plugdash already sends `X-Accel-Buffering: no` to ask proxies not
+to buffer it, but some proxies still need explicit configuration:
+
+- Disable response buffering for the stream so events flush immediately. In
+  nginx, set `proxy_buffering off;` (and `proxy_cache off;`) on the
+  `/api/stream` location.
+- Don't close idle connections too aggressively: keep `proxy_read_timeout`
+  generous (the connection is intentionally long-lived even when quiet) and use
+  HTTP/1.1.
+
+```nginx
+location /api/stream {
+    proxy_pass            http://127.0.0.1:8080;
+    proxy_http_version    1.1;
+    proxy_set_header      Connection "";
+    proxy_buffering       off;
+    proxy_cache           off;
+    proxy_read_timeout    1h;
+}
+```
+
+If live updates work locally but not behind the proxy (the **Live** toggle stays
+connected but widgets only refresh on reload), buffering is the usual culprit.
 
 ## External plugins in containers
 

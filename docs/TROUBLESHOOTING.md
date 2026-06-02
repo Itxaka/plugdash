@@ -283,6 +283,103 @@ to set one).
 
 ---
 
+## Widgets never load / stay on the loading state
+
+**Symptom.** Cards sit on their loading/skeleton state and never fill in
+with data.
+
+**Cause.** Execution is now **server-side and presence-gated**. The server
+only runs trackers while a client is actually watching — that is, while
+there is an open SSE subscriber on `/api/stream`, or a client has polled
+`/api/run` within the last ~20 seconds. With nobody connected, the engine
+goes fully idle and makes no upstream calls (no point polling external APIs
+when no one is looking, and no history is kept). If your client never
+establishes presence, no runs happen and the widgets stay blank.
+
+**Fix.** Make sure the **Live** toggle in the dashboard toolbar is **ON** —
+that is what opens the SSE connection / polling that registers presence. If
+you are behind a reverse proxy, SSE on `/api/stream` may be buffered or
+blocked, which prevents the stream from ever opening; disable proxy
+buffering (for nginx, `proxy_buffering off;`). Even without working SSE, the
+client **auto-falls back to polling `/api/run` every 8 seconds**, so widgets
+should still fill within ~8 seconds. Give it a moment on first load: the
+first run of each tracker has to complete before its card has anything to
+show.
+
+---
+
+## No live updates / cards don't refresh
+
+**Symptom.** Widgets loaded once but never update on their own.
+
+**Cause.** Live updates depend on the same presence mechanism. If the
+**Live** toggle is off, or the SSE stream isn't actually open, the engine
+won't keep scheduling runs for you. Proxy buffering or aggressive idle
+timeouts can silently kill a long-lived SSE connection.
+
+**Fix.** Confirm the **Live** toggle is on. In the browser **network tab**,
+check that `/api/stream` is an open `text/event-stream` request that stays
+connected. If a proxy is buffering or timing out the stream, fix the proxy
+(see [Widgets never load](#widgets-never-load--stay-on-the-loading-state)) —
+otherwise the client falls back to polling `/api/run`, which still works but
+is less immediate. Note that each tracker refreshes on **its own interval**
+(its `refresh_interval_seconds` override, or the plugin default), not
+instantly — so cards update at their own cadence, not all at once.
+
+---
+
+## Can't edit or delete a tracker (Edit/Delete missing or 403)
+
+**Symptom.** A tracker has no Edit/Delete controls, shows a `config` badge,
+or the API returns **403** when you try to edit or delete it.
+
+**Cause.** That tracker is **managed by the config file** (`source=file`).
+File-managed trackers are read-only in the UI by design — the config file is
+their source of truth, so the API rejects UI edits and deletes of them with
+a 403.
+
+**Fix.** Edit the tracker in the **YAML config file** and restart plugdash to
+apply the change. If instead you want to manage that tracker from the UI,
+**remove its entry from the config** (and restart); once it is no longer
+file-managed you can edit and delete it normally.
+
+---
+
+## Trackers from my config file disappeared
+
+**Symptom.** Trackers you had defined in the config file are gone after a
+restart.
+
+**Cause.** File-managed trackers are **reconciled on startup**. If you start
+plugdash **without `--config`**, or you removed an entry from the file, the
+corresponding file trackers no longer have a backing spec and are **deleted**
+during reconciliation. (User-created DB trackers, `source=db`, are never
+touched by this — only file trackers are reconciled away.)
+
+**Fix.** Always start plugdash with **`--config` pointing at the same file**.
+To remove a single file tracker, delete just its entry from the config; to
+keep them all, keep them all in the file and keep passing `--config`.
+
+---
+
+## Config file fails / server won't start with --config
+
+**Symptom.** plugdash aborts at startup with a fatal error when given
+`--config`.
+
+**Cause.** Config parsing is **strict**. Unknown or misspelled keys are
+rejected, `plugin` is **required** on every tracker entry, and duplicate keys
+are an error. Any one of these aborts startup rather than starting with a
+partially-applied config.
+
+**Fix.** Read the error message — it names the offending entry by its
+`trackers[N]` index (for example `trackers[2]: plugin is required` or
+`trackers[3]: duplicate key "..."`). Fix that entry: correct the misspelled
+key, add the required `plugin` field, or give each tracker a unique key.
+Then start again.
+
+---
+
 ## FAQ
 
 **Does plugdash store historical data / metrics over time?**

@@ -33,9 +33,11 @@ type Settings struct {
 }
 
 // DefaultSettings returns the settings used before a user has saved any.
+// Live updates default on: with the server-side engine, viewing the dashboard
+// is what drives (and gates) execution.
 func DefaultSettings() Settings {
 	return Settings{
-		AutoRefreshEnabled:  false,
+		AutoRefreshEnabled:  true,
 		AutoRefreshInterval: DefaultAutoRefreshInterval,
 	}
 }
