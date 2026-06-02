@@ -95,6 +95,9 @@ const API = {
 let settingsCache = null;
 // One timer per card, each firing at that widget's own effective interval.
 let autoRefreshTimers = [];
+// Catch-up handler run when the tab becomes visible again (browsers throttle /
+// freeze timers in background tabs, so long-interval widgets miss their tick).
+let visibilityHandler = null;
 
 const SETTINGS_DEFAULTS = {
   autorefresh_enabled: false,
@@ -103,6 +106,10 @@ const SETTINGS_DEFAULTS = {
 function clearAutoRefresh() {
   for (const t of autoRefreshTimers) clearInterval(t);
   autoRefreshTimers = [];
+  if (visibilityHandler) {
+    document.removeEventListener("visibilitychange", visibilityHandler);
+    visibilityHandler = null;
+  }
 }
 
 // The Logs view polls so entries stream in as trackers run.
@@ -572,6 +579,14 @@ async function renderDashboard() {
         autoRefreshTimers.push(setInterval(() => refreshCard(s, true), secs * 1000));
       }
     }
+    // Background tabs throttle/freeze timers, so a long-interval widget can miss
+    // its tick entirely. When the tab becomes visible again, refresh any widget
+    // whose interval has elapsed (refreshCard with force=false is gated by it).
+    visibilityHandler = () => {
+      if (document.visibilityState !== "visible") return;
+      for (const s of cardStates) refreshCard(s, false);
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
   }
 
   // refreshCard re-runs a single widget. When force is false it is skipped if
