@@ -67,7 +67,7 @@ func TestRunReturnsListResult(t *testing.T) {
 	plugins.GHBaseURL = srv.URL
 	defer func() { plugins.GHBaseURL = orig }()
 
-	cfg := plugin.Config{"repo": "owner/repo", "count": 2}
+	cfg := plugin.Config{"repo": "owner/repo", "count": 2, "show_prereleases": true}
 	result, err := New().Run(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -118,8 +118,9 @@ func TestRunCountDefaultsAndCaps(t *testing.T) {
 	plugins.GHBaseURL = srv.URL
 	defer func() { plugins.GHBaseURL = orig }()
 
-	// count omitted -> default path still works and returns all stub entries.
-	cfg := plugin.Config{"repo": "owner/repo"}
+	// count omitted -> default path still works; with prereleases enabled all
+	// stub entries are returned.
+	cfg := plugin.Config{"repo": "owner/repo", "show_prereleases": true}
 	result, err := New().Run(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -127,6 +128,31 @@ func TestRunCountDefaultsAndCaps(t *testing.T) {
 	items := decodeItems(t, result.Data)
 	if len(items) != 3 {
 		t.Fatalf("got %d items, want 3 with default count", len(items))
+	}
+}
+
+// TestRunHidesPrereleasesByDefault verifies the default (show_prereleases off)
+// drops drafts/prereleases, leaving only the stable release, marked "latest".
+func TestRunHidesPrereleasesByDefault(t *testing.T) {
+	srv := newStubServer(t)
+	defer srv.Close()
+	orig := plugins.GHBaseURL
+	plugins.GHBaseURL = srv.URL
+	defer func() { plugins.GHBaseURL = orig }()
+
+	result, err := New().Run(context.Background(), plugin.Config{"repo": "owner/repo"})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	items := decodeItems(t, result.Data)
+	if len(items) != 1 {
+		t.Fatalf("got %d items, want 1 (only the stable release)", len(items))
+	}
+	if got := str(items[0]["title"]); got != "Old Release" {
+		t.Errorf("title = %q, want the stable %q", got, "Old Release")
+	}
+	if got := str(items[0]["badge"]); got != "latest" {
+		t.Errorf("badge = %q, want %q", got, "latest")
 	}
 }
 

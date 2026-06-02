@@ -42,6 +42,13 @@ func (p *Plugin) ConfigSchema() []plugin.ConfigField {
 			Help:    "How many recent releases to show (default 5).",
 		},
 		{
+			Key:     "show_prereleases",
+			Label:   "Show prereleases",
+			Type:    plugin.FieldBool,
+			Default: false,
+			Help:    "Include prereleases and drafts. Off by default — only stable releases are shown.",
+		},
+		{
 			Key:   "token",
 			Label: "GitHub token (optional)",
 			Type:  plugin.FieldString,
@@ -69,15 +76,49 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 	if count <= 0 {
 		count = 5
 	}
+	showPre := cfg.Bool("show_prereleases")
+
+	// When hiding prereleases/drafts we may need to look past several of them to
+	// find `count` stable releases, so fetch a larger window then filter.
+	fetchN := count
+	if !showPre {
+		fetchN = count * 4
+		if fetchN > 100 {
+			fetchN = 100
+		}
+	}
 
 	client := plugins.NewGHClient(cfg.String("token"))
-	releases, err := client.ListReleases(ctx, owner, name, count)
+	all, err := client.ListReleases(ctx, owner, name, fetchN)
 	if err != nil {
 		return plugin.Result{}, err
 	}
 
+	// Filter out prereleases/drafts unless explicitly enabled, then cap to count.
+	releases := all[:0:0]
+	for _, r := range all {
+		if !showPre && (r.Prerelease || r.Draft) {
+			continue
+		}
+		releases = append(releases, r)
+		if len(releases) >= count {
+			break
+		}
+	}
+
+	// GitHub's "Latest" release is the newest published, non-draft,
+	// non-prerelease one. ListReleases returns newest-first, so it is the first
+	// such entry.
+	latestIdx := -1
+	for i, r := range releases {
+		if !r.Draft && !r.Prerelease {
+			latestIdx = i
+			break
+		}
+	}
+
 	items := make([]listItem, 0, len(releases))
-	for _, r := range releases {
+	for i, r := range releases {
 		title := r.Name
 		if title == "" {
 			title = r.TagName
@@ -88,6 +129,9 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 			badge = "draft"
 		case r.Prerelease:
 			badge = "prerelease"
+		}
+		if i == latestIdx {
+			badge = "latest"
 		}
 		ts := ""
 		if !r.PublishedAt.IsZero() {

@@ -66,7 +66,11 @@ release and shows its tag, asset count, publish date, and a `draft` /
 |-----|-------|------|----------|---------|-------|
 | `repo` | Repository | string | yes | — | `owner/repo` or full URL |
 | `count` | Number of releases | number | no | 5 | How many recent releases to show |
+| `show_prereleases` | Show prereleases | bool | no | false | Include prereleases/drafts. Off by default — only stable releases |
 | `token` | GitHub token (optional) | string | no | — | Raises rate limits; falls back to `GITHUB_TOKEN` |
+
+The newest stable (non-draft, non-prerelease) release is tagged `latest` (a green
+badge in the UI). Prereleases get a `prerelease` badge when shown.
 
 ```json
 {

@@ -260,7 +260,9 @@ function renderList(data) {
       );
     }
     if (item.badge) {
-      metaChildren.push(el("span", { class: "pill", text: String(item.badge) }));
+      const b = String(item.badge);
+      const slug = b.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      metaChildren.push(el("span", { class: "pill pill-" + slug, text: b }));
     }
     const meta = metaChildren.length
       ? el("div", { class: "list-meta" }, metaChildren)
@@ -790,9 +792,36 @@ function iconFor(pluginId) {
   return map[pluginId] || { g: "🧩", c: "#9aa4b1" };
 }
 
+// Inline line-icons (Lucide-ish) per plugin type. Unlike emoji these center
+// perfectly in the badge and inherit the type colour via currentColor. The
+// dropdown still uses iconFor()'s emoji since <option> can't hold markup.
+const ICON_SVG = {
+  "github-releases": '<path d="M3 3h7l11 11-7 7L3 10z"/><circle cx="7.5" cy="7.5" r="1.4" fill="currentColor" stroke="none"/>',
+  "github-release-artifacts": '<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>',
+  "github-repo-stats": '<line x1="5" y1="20" x2="5" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="19" y1="20" x2="19" y2="9"/>',
+  "github-actions-status": '<circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/>',
+  "github-activity": '<path d="M3 13h4l3-8 4 16 3-8h4"/>',
+  "github-activity-rate": '<line x1="6" y1="20" x2="6" y2="13"/><line x1="12" y1="20" x2="12" y2="6"/><line x1="18" y1="20" x2="18" y2="10"/>',
+  "github-issues": '<circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><circle cx="12" cy="16.3" r="0.7" fill="currentColor" stroke="none"/>',
+  "file-version": '<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/>',
+  "http-health": '<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a14 14 0 010 18 14 14 0 010-18"/>',
+  "rss-feed": '<path d="M5 11a8 8 0 018 8"/><path d="M5 5a14 14 0 0114 14"/><circle cx="6" cy="18" r="1.4" fill="currentColor" stroke="none"/>',
+  "docker-image": '<rect x="3.5" y="10.5" width="4" height="4"/><rect x="9" y="10.5" width="4" height="4"/><rect x="14.5" y="10.5" width="4" height="4"/><rect x="9" y="5.5" width="4" height="4"/><path d="M3 14.5c4 3 13 2 16-3"/>',
+};
+const ICON_SVG_DEFAULT = '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>';
+
+function svgFor(pluginId) {
+  const inner = ICON_SVG[pluginId] || ICON_SVG_DEFAULT;
+  return (
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+    'stroke-linejoin="round" aria-hidden="true">' + inner + "</svg>"
+  );
+}
+
 function buildCardShell(tracker) {
   const ic = iconFor(tracker.plugin_id);
-  const iconEl = el("div", { class: "card-icon", text: ic.g });
+  const iconEl = el("div", { class: "card-icon", html: svgFor(tracker.plugin_id) });
   iconEl.style.color = ic.c;
   iconEl.style.background = ic.c + "22";
   iconEl.style.boxShadow = "inset 0 0 0 1px " + ic.c + "44";
@@ -1078,7 +1107,7 @@ async function renderConfigure() {
         }
       });
       const ic = iconFor(t.plugin_id);
-      const trIcon = el("div", { class: "card-icon tracker-icon", text: ic.g });
+      const trIcon = el("div", { class: "card-icon tracker-icon", html: svgFor(t.plugin_id) });
       trIcon.style.color = ic.c;
       trIcon.style.background = ic.c + "22";
       trIcon.style.boxShadow = "inset 0 0 0 1px " + ic.c + "44";

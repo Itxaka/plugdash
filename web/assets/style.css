@@ -827,6 +827,17 @@ body {
   line-height: 1;
 }
 
+.card-icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.tracker-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
 .card-titles {
   min-width: 0;
   flex: 1;
@@ -1522,4 +1533,19 @@ html.party .logo {
   object-fit: cover;
   margin-top: 1px;
   background: var(--bg-elev-2);
+}
+
+/* Coloured list badges (release latest / prerelease / draft). */
+.pill-latest {
+  color: var(--green);
+  background: rgba(63, 185, 80, 0.14);
+  border-color: rgba(63, 185, 80, 0.4);
+}
+.pill-prerelease {
+  color: var(--yellow);
+  background: rgba(210, 153, 34, 0.14);
+  border-color: rgba(210, 153, 34, 0.4);
+}
+.pill-draft {
+  color: var(--text-dim);
 }

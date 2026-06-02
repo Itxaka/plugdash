@@ -472,3 +472,23 @@ Full protocol in [`docs/PLUGINS.md`](docs/PLUGINS.md#7-external-plugins-any-lang
 ```sh
 go test ./...
 ```
+
+## License
+
+Not yet chosen — treat as all rights reserved until a `LICENSE` is added.
+
+---
+
+<details>
+<summary>🎮 You reached the end…</summary>
+
+There's an easter egg. On the **Settings** page, enter the
+[Konami code](https://en.wikipedia.org/wiki/Konami_Code):
+
+```
+↑ ↑ ↓ ↓ ← → ← → B A
+```
+
+Enjoy. Enter it again to turn it off. 🎉
+
+</details>
