@@ -877,8 +877,34 @@ function updateCardFoot(card, intervalSec, at) {
     card.cadenceEl.textContent = c ? "updates every " + c : "";
   }
   if (card.updatedEl) {
-    card.updatedEl.textContent = at ? "updated " + fmtTimestamp(at) : "";
+    if (at) {
+      // Store the raw fetch time so the live ticker can re-age the "X ago"
+      // label without new data, and expose the exact time on hover.
+      card.updatedEl.dataset.ts = String(at);
+      card.updatedEl.textContent = "updated " + fmtTimestamp(at);
+      card.updatedEl.title = "Data fetched " + new Date(at).toLocaleString();
+    } else {
+      delete card.updatedEl.dataset.ts;
+      card.updatedEl.textContent = "";
+      card.updatedEl.removeAttribute("title");
+    }
   }
+}
+
+// The snapshot's fetch time is fixed and correct; only its human rendering
+// ("2m ago") drifts as the wall clock advances. Re-age every card's label on a
+// timer so a dashboard left open doesn't sit on a stale "updated just now" — no
+// server calls, purely cosmetic.
+let updatedTicker = null;
+function refreshUpdatedLabels() {
+  document.querySelectorAll(".card-updated[data-ts]").forEach((elm) => {
+    const ts = Number(elm.dataset.ts);
+    if (ts) elm.textContent = "updated " + fmtTimestamp(ts);
+  });
+}
+function startUpdatedTicker() {
+  if (updatedTicker) return;
+  updatedTicker = setInterval(refreshUpdatedLabels, 30000);
 }
 
 // applyCardStatus colors the card's accent strip by widget health, so the
@@ -1851,4 +1877,5 @@ window.addEventListener("hashchange", () => {
 // initial — honor a deep-linked view in the URL hash.
 setupTheme();
 setupKonami();
+startUpdatedTicker();
 setView(location.hash.slice(1) || "dashboard");
