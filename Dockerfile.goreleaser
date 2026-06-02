@@ -1,18 +1,24 @@
 # Used by GoReleaser: packages the already-cross-compiled `plugdash` binary into
-# a minimal image (no Go build here). The multi-stage source build lives in
-# ./Dockerfile and is what `docker build .` / CI uses.
-FROM gcr.io/distroless/static-debian12
+# a `scratch` image. scratch has no per-architecture base image, so this builds
+# for ANY Go target (incl. riscv64, 386) — unlike distroless, which only ships a
+# handful of arches. The CA bundle is copied in (GoReleaser extra_files) so the
+# static binary can make HTTPS calls.
+#
+# The multi-stage source build for `docker build .` / CI lives in ./Dockerfile.
+FROM scratch
 
 LABEL org.opencontainers.image.title="plugdash" \
       org.opencontainers.image.description="A small, self-contained plugin dashboard (CI status, releases, activity, issues, image checks)."
 
+COPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY plugdash /plugdash
+
 WORKDIR /data
 VOLUME ["/data"]
 
-COPY plugdash /plugdash
-
 EXPOSE 8080
-ENV PLUGDASH_PLUGINS_DIR=/data/plugins
+ENV PLUGDASH_PLUGINS_DIR=/data/plugins \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 ENTRYPOINT ["/plugdash"]
 CMD ["-addr", ":8080", "-db", "/data/plugdash.db"]

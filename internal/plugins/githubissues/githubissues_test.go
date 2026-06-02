@@ -22,6 +22,7 @@ const issuesPayload = `[
 		"html_url": "https://github.com/o/r/issues/10",
 		"comments": 0,
 		"created_at": "2026-05-30T10:00:00Z",
+		"labels": [{"name": "bug"}, {"name": "Blocked"}],
 		"user": {"login": "alice"}
 	},
 	{
@@ -75,6 +76,28 @@ func decodeItems(t *testing.T, res plugin.Result) []listItem {
 		t.Fatalf("unmarshal data: %v", err)
 	}
 	return wrap.Items
+}
+
+func TestRun_ExcludeLabels(t *testing.T) {
+	newStub(t)
+	// #10 carries a "Blocked" label; excluding "blocked" (case-insensitive)
+	// should drop it, leaving no unanswered issues.
+	res, err := New().Run(context.Background(), plugin.Config{
+		"repos":          "o/r",
+		"exclude_labels": "blocked\nneed-discussion",
+	})
+	if err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	items := decodeItems(t, res)
+	for _, it := range items {
+		if it.Title == "Newer issue with no reply" {
+			t.Fatalf("issue with excluded label 'Blocked' should be hidden: %+v", items)
+		}
+	}
+	if len(items) != 0 {
+		t.Fatalf("got %d items, want 0 after excluding the only unanswered issue: %+v", len(items), items)
+	}
 }
 
 func TestRun_UnansweredOnly(t *testing.T) {

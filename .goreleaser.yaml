@@ -73,15 +73,17 @@ changelog:
       - "^chore:"
       - "merge conflict"
 
-# Per-arch images, combined into one multi-arch tag by docker_manifests below.
+# Per-arch images (scratch base → every Go arch incl. riscv64/386), combined
+# into one multi-arch tag by docker_manifests below. extra_files ships the CA
+# bundle into the build context for Dockerfile.goreleaser.
 dockers:
   - id: amd64
     goos: linux
     goarch: amd64
     dockerfile: Dockerfile.goreleaser
     use: buildx
-    image_templates:
-      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-amd64"
+    extra_files: [ca-certificates.crt]
+    image_templates: ["ghcr.io/itxaka/plugdash:{{ .Tag }}-amd64"]
     build_flag_templates:
       - "--platform=linux/amd64"
       - "--label=org.opencontainers.image.version={{ .Tag }}"
@@ -91,8 +93,8 @@ dockers:
     goarch: arm64
     dockerfile: Dockerfile.goreleaser
     use: buildx
-    image_templates:
-      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-arm64"
+    extra_files: [ca-certificates.crt]
+    image_templates: ["ghcr.io/itxaka/plugdash:{{ .Tag }}-arm64"]
     build_flag_templates:
       - "--platform=linux/arm64"
       - "--label=org.opencontainers.image.version={{ .Tag }}"
@@ -103,8 +105,8 @@ dockers:
     goarm: "7"
     dockerfile: Dockerfile.goreleaser
     use: buildx
-    image_templates:
-      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-armv7"
+    extra_files: [ca-certificates.crt]
+    image_templates: ["ghcr.io/itxaka/plugdash:{{ .Tag }}-armv7"]
     build_flag_templates:
       - "--platform=linux/arm/v7"
       - "--label=org.opencontainers.image.version={{ .Tag }}"
@@ -114,8 +116,8 @@ dockers:
     goarch: ppc64le
     dockerfile: Dockerfile.goreleaser
     use: buildx
-    image_templates:
-      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-ppc64le"
+    extra_files: [ca-certificates.crt]
+    image_templates: ["ghcr.io/itxaka/plugdash:{{ .Tag }}-ppc64le"]
     build_flag_templates:
       - "--platform=linux/ppc64le"
       - "--label=org.opencontainers.image.version={{ .Tag }}"
@@ -125,10 +127,32 @@ dockers:
     goarch: s390x
     dockerfile: Dockerfile.goreleaser
     use: buildx
-    image_templates:
-      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-s390x"
+    extra_files: [ca-certificates.crt]
+    image_templates: ["ghcr.io/itxaka/plugdash:{{ .Tag }}-s390x"]
     build_flag_templates:
       - "--platform=linux/s390x"
+      - "--label=org.opencontainers.image.version={{ .Tag }}"
+      - "--label=org.opencontainers.image.source=https://github.com/Itxaka/plugdash"
+  - id: riscv64
+    goos: linux
+    goarch: riscv64
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    extra_files: [ca-certificates.crt]
+    image_templates: ["ghcr.io/itxaka/plugdash:{{ .Tag }}-riscv64"]
+    build_flag_templates:
+      - "--platform=linux/riscv64"
+      - "--label=org.opencontainers.image.version={{ .Tag }}"
+      - "--label=org.opencontainers.image.source=https://github.com/Itxaka/plugdash"
+  - id: "386"
+    goos: linux
+    goarch: "386"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    extra_files: [ca-certificates.crt]
+    image_templates: ["ghcr.io/itxaka/plugdash:{{ .Tag }}-386"]
+    build_flag_templates:
+      - "--platform=linux/386"
       - "--label=org.opencontainers.image.version={{ .Tag }}"
       - "--label=org.opencontainers.image.source=https://github.com/Itxaka/plugdash"
 
@@ -140,6 +164,8 @@ docker_manifests:
       - "ghcr.io/itxaka/plugdash:{{ .Tag }}-armv7"
       - "ghcr.io/itxaka/plugdash:{{ .Tag }}-ppc64le"
       - "ghcr.io/itxaka/plugdash:{{ .Tag }}-s390x"
+      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-riscv64"
+      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-386"
   - name_template: "ghcr.io/itxaka/plugdash:v{{ .Major }}.{{ .Minor }}"
     image_templates: *arches
   - name_template: "ghcr.io/itxaka/plugdash:latest"

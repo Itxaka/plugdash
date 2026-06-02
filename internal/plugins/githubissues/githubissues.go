@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"plugdash/internal/plugin"
@@ -48,6 +49,13 @@ func (p *Plugin) ConfigSchema() []plugin.ConfigField {
 			Help:    "Only show issues with zero comments.",
 		},
 		{
+			Key:         "exclude_labels",
+			Label:       "Ignore labels",
+			Type:        plugin.FieldList,
+			Placeholder: "blocked\nneed-discussion\nwontfix",
+			Help:        "Hide issues carrying any of these labels (case-insensitive). One per line.",
+		},
+		{
 			Key:     "count",
 			Label:   "Number of issues",
 			Type:    plugin.FieldNumber,
@@ -76,6 +84,20 @@ type ghIssue struct {
 	User        struct {
 		Login string `json:"login"`
 	} `json:"user"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+}
+
+// hasExcludedLabel reports whether the issue carries any of the excluded labels
+// (matched case-insensitively).
+func (i ghIssue) hasExcludedLabel(excluded map[string]bool) bool {
+	for _, l := range i.Labels {
+		if excluded[strings.ToLower(strings.TrimSpace(l.Name))] {
+			return true
+		}
+	}
+	return false
 }
 
 // issue is an issue annotated with the repo it came from.
@@ -110,6 +132,13 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 		count = 10
 	}
 
+	excluded := make(map[string]bool)
+	for _, l := range cfg.List("exclude_labels") {
+		if l = strings.ToLower(strings.TrimSpace(l)); l != "" {
+			excluded[l] = true
+		}
+	}
+
 	client := plugins.NewGHClient(cfg.String("token"))
 
 	var collected []issue
@@ -132,6 +161,9 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 				continue
 			}
 			if unansweredOnly && it.Comments != 0 {
+				continue
+			}
+			if len(excluded) > 0 && it.hasExcludedLabel(excluded) {
 				continue
 			}
 			collected = append(collected, issue{repo: repoName, ghIssue: it})
