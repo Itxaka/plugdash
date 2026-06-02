@@ -18,7 +18,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X main.version={{ .Version }}
+      - -s -w -X main.version={{ .Tag }}
     goos: [linux, darwin, windows, freebsd]
     goarch: [amd64, arm64, arm, "386", ppc64le, s390x, riscv64]
     goarm: ["7"]
@@ -50,7 +50,7 @@ archives:
       - goos: windows
         formats: [zip]
     name_template: >-
-      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}
+      {{ .ProjectName }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}
     files:
       - README.md
       - LICENSE*
@@ -81,10 +81,10 @@ dockers:
     dockerfile: Dockerfile.goreleaser
     use: buildx
     image_templates:
-      - "ghcr.io/itxaka/plugdash:{{ .Version }}-amd64"
+      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-amd64"
     build_flag_templates:
       - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.version={{ .Tag }}"
       - "--label=org.opencontainers.image.source=https://github.com/Itxaka/plugdash"
   - id: arm64
     goos: linux
@@ -92,10 +92,10 @@ dockers:
     dockerfile: Dockerfile.goreleaser
     use: buildx
     image_templates:
-      - "ghcr.io/itxaka/plugdash:{{ .Version }}-arm64"
+      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-arm64"
     build_flag_templates:
       - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.version={{ .Tag }}"
       - "--label=org.opencontainers.image.source=https://github.com/Itxaka/plugdash"
   - id: armv7
     goos: linux
@@ -104,10 +104,10 @@ dockers:
     dockerfile: Dockerfile.goreleaser
     use: buildx
     image_templates:
-      - "ghcr.io/itxaka/plugdash:{{ .Version }}-armv7"
+      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-armv7"
     build_flag_templates:
       - "--platform=linux/arm/v7"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.version={{ .Tag }}"
       - "--label=org.opencontainers.image.source=https://github.com/Itxaka/plugdash"
   - id: ppc64le
     goos: linux
@@ -115,10 +115,10 @@ dockers:
     dockerfile: Dockerfile.goreleaser
     use: buildx
     image_templates:
-      - "ghcr.io/itxaka/plugdash:{{ .Version }}-ppc64le"
+      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-ppc64le"
     build_flag_templates:
       - "--platform=linux/ppc64le"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.version={{ .Tag }}"
       - "--label=org.opencontainers.image.source=https://github.com/Itxaka/plugdash"
   - id: s390x
     goos: linux
@@ -126,21 +126,21 @@ dockers:
     dockerfile: Dockerfile.goreleaser
     use: buildx
     image_templates:
-      - "ghcr.io/itxaka/plugdash:{{ .Version }}-s390x"
+      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-s390x"
     build_flag_templates:
       - "--platform=linux/s390x"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.version={{ .Tag }}"
       - "--label=org.opencontainers.image.source=https://github.com/Itxaka/plugdash"
 
 docker_manifests:
-  - name_template: "ghcr.io/itxaka/plugdash:{{ .Version }}"
+  - name_template: "ghcr.io/itxaka/plugdash:{{ .Tag }}"
     image_templates: &arches
-      - "ghcr.io/itxaka/plugdash:{{ .Version }}-amd64"
-      - "ghcr.io/itxaka/plugdash:{{ .Version }}-arm64"
-      - "ghcr.io/itxaka/plugdash:{{ .Version }}-armv7"
-      - "ghcr.io/itxaka/plugdash:{{ .Version }}-ppc64le"
-      - "ghcr.io/itxaka/plugdash:{{ .Version }}-s390x"
-  - name_template: "ghcr.io/itxaka/plugdash:{{ .Major }}.{{ .Minor }}"
+      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-amd64"
+      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-arm64"
+      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-armv7"
+      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-ppc64le"
+      - "ghcr.io/itxaka/plugdash:{{ .Tag }}-s390x"
+  - name_template: "ghcr.io/itxaka/plugdash:v{{ .Major }}.{{ .Minor }}"
     image_templates: *arches
   - name_template: "ghcr.io/itxaka/plugdash:latest"
     image_templates: *arches
