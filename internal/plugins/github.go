@@ -6,10 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"plugdash/internal/plugin"
@@ -18,6 +21,104 @@ import (
 // GHBaseURL is the GitHub REST API root. It is a var so tests can point it at a
 // local stub server.
 var GHBaseURL = "https://api.github.com"
+
+// ghCacheEntry holds a cached response body and its ETag for conditional GETs.
+type ghCacheEntry struct {
+	etag string
+	body []byte
+}
+
+// ghCache is a process-wide conditional-request cache. Plugins build a fresh
+// GHClient on every run, so a cache living on the client would never survive
+// between runs — it must be package-global. Entries are keyed by request URL +
+// a token fingerprint (so unauthenticated and authenticated views, or different
+// tokens, never share an entry). GitHub conditional requests that come back
+// 304 Not Modified do NOT count against the REST rate limit, so this both cuts
+// latency/bandwidth and conserves the budget for monitored trackers. The cache
+// only grows, bounded by the (small, finite) set of tracker URLs.
+var ghCache = struct {
+	sync.RWMutex
+	m map[string]ghCacheEntry
+}{m: map[string]ghCacheEntry{}}
+
+// ghRate records, per token fingerprint, a time before which GitHub has told us
+// further requests will be rejected (primary rate-limit reset, or a secondary
+// Retry-After). While that time is in the future we fail fast instead of
+// hammering the API and burning more of the budget.
+var ghRate = struct {
+	sync.Mutex
+	until map[string]time.Time
+}{until: map[string]time.Time{}}
+
+// tokenFingerprint maps a token to a short, non-reversible key. The token
+// itself is never used as a map key (avoids leaking it) and "anon" namespaces
+// unauthenticated requests.
+func tokenFingerprint(token string) string {
+	if token == "" {
+		return "anon"
+	}
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(token))
+	return strconv.FormatUint(h.Sum64(), 36)
+}
+
+func ghCacheKey(fp, url string) string { return fp + "\x00" + url }
+
+func ghCacheGet(key string) (ghCacheEntry, bool) {
+	ghCache.RLock()
+	defer ghCache.RUnlock()
+	e, ok := ghCache.m[key]
+	return e, ok
+}
+
+func ghCachePut(key string, e ghCacheEntry) {
+	ghCache.Lock()
+	ghCache.m[key] = e
+	ghCache.Unlock()
+}
+
+// rateLimitedUntil reports whether requests for fp should currently be skipped,
+// returning the reset time. Expired entries are cleared.
+func rateLimitedUntil(fp string) (time.Time, bool) {
+	ghRate.Lock()
+	defer ghRate.Unlock()
+	until, ok := ghRate.until[fp]
+	if !ok {
+		return time.Time{}, false
+	}
+	if time.Now().Before(until) {
+		return until, true
+	}
+	delete(ghRate.until, fp)
+	return time.Time{}, false
+}
+
+func setRateLimited(fp string, until time.Time) {
+	ghRate.Lock()
+	ghRate.until[fp] = until
+	ghRate.Unlock()
+}
+
+// parseRateLimitReset extracts a back-off deadline from a rejected response: a
+// secondary-limit Retry-After (seconds), or a primary-limit X-RateLimit-Reset
+// (unix seconds) but only once the remaining budget is actually exhausted. It
+// returns ok=false for ordinary non-200s (e.g. 404), so those don't trip the
+// back-off.
+func parseRateLimitReset(resp *http.Response) (time.Time, bool) {
+	if ra := resp.Header.Get("Retry-After"); ra != "" {
+		if secs, err := strconv.Atoi(strings.TrimSpace(ra)); err == nil && secs >= 0 {
+			return time.Now().Add(time.Duration(secs) * time.Second), true
+		}
+	}
+	if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+		if reset := resp.Header.Get("X-RateLimit-Reset"); reset != "" {
+			if unix, err := strconv.ParseInt(strings.TrimSpace(reset), 10, 64); err == nil {
+				return time.Unix(unix, 0), true
+			}
+		}
+	}
+	return time.Time{}, false
+}
 
 // GHClient performs authenticated (when a token is present) GitHub API calls.
 type GHClient struct {
@@ -86,7 +187,17 @@ func NormalizeRepo(s string) (owner, repo string, err error) {
 // Get performs a GET against the API path (e.g. "/repos/o/r/releases") and
 // decodes the JSON body into out.
 func (c *GHClient) Get(ctx context.Context, path string, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, GHBaseURL+path, nil)
+	url := GHBaseURL + path
+	fp := tokenFingerprint(c.token)
+	log := plugin.LoggerFrom(ctx)
+
+	// Fail fast if GitHub recently told us this token is rate-limited.
+	if until, limited := rateLimitedUntil(fp); limited {
+		return fmt.Errorf("GitHub API rate limit exceeded — resets at %s (add a GitHub token in Settings to raise the limit)",
+			until.Local().Format("15:04:05"))
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
@@ -95,18 +206,45 @@ func (c *GHClient) Get(ctx context.Context, path string, out any) error {
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
-	log := plugin.LoggerFrom(ctx)
-	log.Debug("github request", "method", http.MethodGet, "url", GHBaseURL+path, "authenticated", c.token != "")
+	// Conditional request: a matching ETag lets GitHub answer 304 (free, no
+	// rate-limit cost) when nothing changed.
+	key := ghCacheKey(fp, url)
+	if ent, ok := ghCacheGet(key); ok && ent.etag != "" {
+		req.Header.Set("If-None-Match", ent.etag)
+	}
+
+	log.Debug("github request", "method", http.MethodGet, "url", url, "authenticated", c.token != "")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		log.Debug("github request failed", "url", GHBaseURL+path, "error", err.Error())
+		log.Debug("github request failed", "url", url, "error", err.Error())
 		return fmt.Errorf("github request: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotModified {
+		ent, ok := ghCacheGet(key)
+		log.Debug("github not-modified (cache hit)", "url", url, "cached", ok)
+		if ok {
+			return json.Unmarshal(ent.body, out)
+		}
+		// The cache never evicts and we only send If-None-Match when an entry
+		// exists, so this is effectively unreachable; surface a retryable error
+		// rather than silently returning empty data.
+		return fmt.Errorf("github cache miss on 304 for %s", url)
+	}
+
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	log.Debug("github response", "url", GHBaseURL+path, "status", resp.StatusCode, "bytes", len(body))
+	log.Debug("github response", "url", url, "status", resp.StatusCode, "bytes", len(body))
 	if resp.StatusCode != http.StatusOK {
-		return rateAwareError(resp, body, GHBaseURL+path)
+		if until, limited := parseRateLimitReset(resp); limited {
+			setRateLimited(fp, until)
+			log.Debug("github rate-limited", "url", url, "until", until.Format(time.RFC3339))
+		}
+		return rateAwareError(resp, body, url)
+	}
+
+	if etag := resp.Header.Get("ETag"); etag != "" {
+		ghCachePut(key, ghCacheEntry{etag: etag, body: body})
 	}
 	if err := json.Unmarshal(body, out); err != nil {
 		return fmt.Errorf("decode github response: %w", err)

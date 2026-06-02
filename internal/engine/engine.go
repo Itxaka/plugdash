@@ -28,6 +28,14 @@ const (
 	// subBuffer is the per-subscriber send buffer; a slow client drops frames
 	// rather than blocking the engine.
 	subBuffer = 64
+	// coldStartSpread bounds how far first runs are staggered. Trackers that
+	// have never run become due at startedAt+offset (offset derived from the
+	// tracker id, capped to its interval), so same-interval trackers don't fire
+	// in one synchronized burst — yet every widget still gets its first data
+	// within this window. Their later runs anchor to these offset first-run
+	// times and stay de-aligned. Kept short so slow-interval widgets don't sit
+	// blank for long on first paint.
+	coldStartSpread = 10 * time.Second
 )
 
 // Snapshot is the cached outcome of a tracker run, served to clients and pushed
@@ -55,7 +63,8 @@ type Engine struct {
 	trackers []*store.Tracker
 	subs     map[chan []byte]struct{}
 
-	lastPoll time.Time // last cached-poll fallback request (counts as presence)
+	lastPoll  time.Time // last cached-poll fallback request (counts as presence)
+	startedAt time.Time // when Start ran; anchors first-run stagger
 
 	sem    chan struct{}
 	wake   chan struct{} // nudge the scheduler (new subscriber / reconcile / force)
@@ -94,6 +103,7 @@ func (noopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
 // Start launches the scheduler loop. Stop ends it.
 func (e *Engine) Start() {
+	e.startedAt = time.Now()
 	_ = e.Reconcile()
 	go e.loop()
 }
@@ -165,9 +175,18 @@ func (e *Engine) runDue(force bool, forceID int64) {
 		}
 		interval := e.effectiveInterval(t)
 		e.mu.Lock()
-		due := force ||
-			e.lastRun[t.ID].IsZero() ||
-			now.Sub(e.lastRun[t.ID]) >= time.Duration(interval)*time.Second
+		last := e.lastRun[t.ID]
+		var due bool
+		switch {
+		case force:
+			due = true
+		case last.IsZero():
+			// Never ran: hold off until this tracker's staggered slot so a fleet
+			// of same-interval trackers doesn't stampede on the first tick.
+			due = now.Sub(e.startedAt) >= phaseOffset(t.ID, interval)
+		default:
+			due = now.Sub(last) >= time.Duration(interval)*time.Second
+		}
 		if due && !e.running[t.ID] {
 			e.running[t.ID] = true
 		} else {
@@ -179,6 +198,27 @@ func (e *Engine) runDue(force bool, forceID int64) {
 		}
 		go e.runOne(t)
 	}
+}
+
+// phaseOffset returns a stable per-tracker delay within [0, spread), where
+// spread is coldStartSpread capped to the tracker's own interval. A multiplicative
+// hash of the id spreads trackers across the window deterministically (same id →
+// same slot across restarts), avoiding a synchronized first-run burst without any
+// randomness (which would also defeat resume/replay determinism).
+func phaseOffset(id int64, intervalSec int) time.Duration {
+	// A 0/sub-second interval means "run as fast as possible" — never stagger it.
+	if intervalSec <= 0 {
+		return 0
+	}
+	spread := coldStartSpread
+	if d := time.Duration(intervalSec) * time.Second; d < spread {
+		spread = d
+	}
+	if spread <= 0 {
+		return 0
+	}
+	mixed := uint64(id) * 2654435761 // Knuth multiplicative hash
+	return time.Duration(mixed % uint64(spread))
 }
 
 // effectiveInterval is the tracker override if set, else the plugin default.

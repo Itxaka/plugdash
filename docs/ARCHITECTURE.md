@@ -171,6 +171,11 @@ cost of a busy dashboard is decoupled from the number of viewers.
 - **Polling fallback.** If `EventSource` fails or closes, the browser polls `GET /api/run` every
   **8s**. That is a cached read of `SnapshotAll()` (tracker order, runs nothing) which also calls
   `Poll()` to keep presence alive — so poll-only clients still drive the scheduler.
+- **First-run stagger (anti-thundering-herd).** A tracker that has never run becomes due at
+  `startedAt + phaseOffset(id)`, where the offset is a deterministic hash of the tracker id capped to
+  `min(interval, 10s)`. Same-interval trackers therefore don't all fire on the same tick — their
+  later runs anchor to these offset first-run times and stay de-aligned — while every widget still
+  gets its first data within ~10s. 0/sub-second-interval trackers ("run ASAP") are never staggered.
 - **Force.** A per-widget refresh calls `Engine.Force(id)`, enqueued on `forceC` and serviced
   immediately by the loop; it runs that one tracker **regardless of presence or interval**.
 - **Reconcile.** After any tracker create/update/delete (or a config reload), the server calls
@@ -307,6 +312,13 @@ startup by **`internal/config`** alongside ad-hoc trackers created in the UI —
   registry queries), and `ghactivity.go` (paginated activity fetching and the metric options the
   activity/stars plugins plot). These centralize the "fetch + reconstruct timeseries from timestamps"
   logic the just-in-time charts rely on.
+- **GitHub client resilience.** Plugins build a fresh `GHClient` per run, so two safeguards live in
+  **process-global** state (keyed by a token fingerprint so auth contexts never mix): an **ETag
+  conditional-request cache** — `GHClient.Get` stores each response's `ETag`/body and replays
+  `If-None-Match`, so an unchanged resource returns **`304 Not Modified` (free, no rate-limit cost)**
+  and the cached body is reused; and a **rate-limit back-off** — on a `403`/`429` carrying
+  `Retry-After` or an exhausted `X-RateLimit-Remaining`, the reset time is recorded and further calls
+  for that token **fail fast** until it passes, instead of hammering the API.
 
 ### `web` — embedded SPA
 
