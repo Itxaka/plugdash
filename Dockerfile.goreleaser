@@ -1,0 +1,18 @@
+# Used by GoReleaser: packages the already-cross-compiled `plugdash` binary into
+# a minimal image (no Go build here). The multi-stage source build lives in
+# ./Dockerfile and is what `docker build .` / CI uses.
+FROM gcr.io/distroless/static-debian12
+
+LABEL org.opencontainers.image.title="plugdash" \
+      org.opencontainers.image.description="A small, self-contained plugin dashboard (CI status, releases, activity, issues, image checks)."
+
+WORKDIR /data
+VOLUME ["/data"]
+
+COPY plugdash /plugdash
+
+EXPOSE 8080
+ENV PLUGDASH_PLUGINS_DIR=/data/plugins
+
+ENTRYPOINT ["/plugdash"]
+CMD ["-addr", ":8080", "-db", "/data/plugdash.db"]
