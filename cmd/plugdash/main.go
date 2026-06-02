@@ -13,6 +13,7 @@ import (
 	"plugdash/internal/extplugin"
 	"plugdash/internal/plugin"
 	"plugdash/internal/plugins/dockerimage"
+	"plugdash/internal/plugins/fileversion"
 	"plugdash/internal/plugins/githubactions"
 	"plugdash/internal/plugins/githubartifacts"
 	"plugdash/internal/plugins/githubissues"
@@ -87,6 +88,7 @@ func main() {
 	reg.Register(githubstars.New())
 	reg.Register(githubrate.New())
 	reg.Register(githubissues.New())
+	reg.Register(fileversion.New())
 
 	srv := server.New(reg, st, web.FS())
 	srv.SetLogging(logger, logRing, level)

@@ -113,6 +113,7 @@ type listItem struct {
 	URL       string `json:"url"`
 	Timestamp string `json:"timestamp"`
 	Badge     string `json:"badge,omitempty"`
+	Icon      string `json:"icon,omitempty"`
 }
 
 func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, error) {
@@ -193,12 +194,14 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 		if it.Comments == 0 {
 			badge = "no reply"
 		}
+		owner, _, _ := strings.Cut(it.repo, "/")
 		items = append(items, listItem{
 			Title:     it.Title,
 			Subtitle:  subtitle,
 			URL:       it.HTMLURL,
 			Timestamp: ts,
 			Badge:     badge,
+			Icon:      plugins.OwnerAvatarURL(owner),
 		})
 	}
 

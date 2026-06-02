@@ -45,7 +45,7 @@ deployment behind a reverse proxy (`DEPLOYMENT.md`), tuning refresh and tokens
 ### For plugin authors
 
 - [PLUGINS.md](PLUGINS.md) — how to write a plugin, both in Go and as an external executable in any language.
-- [../examples/plugins/plugdash-plugin-fileversion](../examples/plugins/plugdash-plugin-fileversion) — a complete external (Python) plugin example.
+- [../examples/plugins/plugdash-plugin-example](../examples/plugins/plugdash-plugin-example) — a minimal external (Python) plugin example.
 
 ### For developers
 

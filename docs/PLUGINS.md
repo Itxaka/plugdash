@@ -481,11 +481,15 @@ The executable must handle two subcommands, exchanging JSON over stdio:
 
 ### Example
 
-A complete, dependency-free example lives at
-`examples/plugins/plugdash-plugin-fileversion` (Python). It tracks the value of a
-variable in a file on a repo branch — e.g. the `go` directive in a `go.mod`, or
-a pinned dependency version — which is handy for watching deps across many repos
-at a glance. Copy it into your plugins directory, mark it executable, and rescan.
+A minimal, dependency-free example lives at
+`examples/plugins/plugdash-plugin-example` (Python, stdlib-only) — it reports the
+current UTC time as a `stat`, showing the `describe`/`run` protocol end to end.
+Copy it into your plugins directory, mark it executable, and rescan.
+
+The "track a variable's value in a file on a branch" idea (e.g. the `go`
+directive in a `go.mod`) ships as the **built-in** `file-version` plugin, so it
+works in every deployment without an interpreter — see its source at
+`internal/plugins/fileversion/` for a real-world worked example.
 
 ### Security
 

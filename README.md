@@ -461,10 +461,11 @@ Settings / `POST /api/plugins/rescan`. The executable answers two subcommands:
 stdin, prints a Result JSON). External plugins behave exactly like built-ins in
 the UI and are flagged `external` in `GET /api/plugins`.
 
-A complete Python example that tracks a variable's value in a file on a repo
-branch (e.g. the `go` version in a `go.mod`) is in
-[`examples/plugins/plugdash-plugin-fileversion`](examples/plugins/plugdash-plugin-fileversion).
+A minimal, dependency-free Python example is in
+[`examples/plugins/plugdash-plugin-example`](examples/plugins/plugdash-plugin-example).
 Full protocol in [`docs/PLUGINS.md`](docs/PLUGINS.md#7-external-plugins-any-language).
+(The "track a value in a file" idea is also available as the built-in
+`file-version` plugin, so it works in every deployment without an interpreter.)
 
 ## Running tests
 

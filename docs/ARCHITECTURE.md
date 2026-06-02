@@ -280,7 +280,7 @@ plugdash/
 │   └── assets/
 │       └── app.js              Vanilla-JS SPA: API client + per-visualization renderers.
 ├── examples/
-│   └── plugins/                Example external plugins (e.g. plugdash-plugin-fileversion).
+│   └── plugins/                Example external plugins (e.g. plugdash-plugin-example).
 └── docs/
     └── ARCHITECTURE.md         This document.
 ```

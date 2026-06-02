@@ -50,6 +50,7 @@ plugdash Settings UI is exported into `GITHUB_TOKEN` at startup (see
 | `github-activity` | timeseries | 24h | Cumulative stars/commits/issues/PRs over time |
 | `github-activity-rate` | timeseries | 6h | Per-period counts of stars/commits/issues/PRs |
 | `github-issues` | list | 15m | Latest open issues needing a first reply across repos |
+| `file-version` | stat | 1h | Value of a variable in a file on a repo branch (e.g. a pinned dependency) |
 
 ---
 
@@ -358,14 +359,46 @@ combined, sorted newest-first across all repos, and trimmed to `count`.
 |-----|-------|------|----------|---------|-------|
 | `repos` | Repositories | list | yes | — | One `owner/repo` per line |
 | `unanswered_only` | Unanswered only | bool | no | true | Only show issues with zero comments |
+| `exclude_labels` | Ignore labels | list | no | — | Hide issues carrying any of these labels (case-insensitive), one per line |
 | `count` | Number of issues | number | no | 10 | Max issues to show in total |
 | `token` | GitHub token (optional) | string | no | — | Falls back to `GITHUB_TOKEN` |
 
 **Behaviors:** the GitHub issues endpoint also returns pull requests; those carry
 a non-null `pull_request` field and are **excluded**. With `unanswered_only` true
 (the default — a missing key is treated as true), issues with any comments are
-filtered out. Issues with zero comments get a `no reply` badge regardless of the
-filter.
+filtered out. `exclude_labels` drops issues tagged with e.g. `blocked` or
+`need-discussion`. Issues with zero comments get a `no reply` badge, and each
+item shows its repo owner's avatar. (The `github-actions-status` checklist items
+likewise show the org avatar per repo.)
+
+---
+
+## File Value Watcher — `file-version` (visualization: `stat`)
+
+Reads a file on a GitHub repo branch (over `raw.githubusercontent.com`) and
+reports the value of a named variable as a single stat — handy for watching a
+pinned dependency or the `go` directive in a `go.mod` across repos.
+
+**Default refresh interval:** 1h
+
+| Key | Label | Type | Required | Default | Notes |
+|-----|-------|------|----------|---------|-------|
+| `repo` | Repository | string | yes | — | `owner/repo` or full URL |
+| `ref` | Branch or tag | string | no | `main` | Branch/tag to read from |
+| `path` | File path | string | yes | — | Path to the file within the repo |
+| `key` | Variable name | string | yes | — | Name left of a `=` / `:` (or whitespace, e.g. the go.mod `go` directive) |
+
+**Behaviors:** matches `key = value`, `key: value`, or whitespace-delimited
+`key value`; strips surrounding quotes and a trailing comma. Missing key →
+`status: error`, value `not found`. Public repos only (raw content; no token).
+
+```json
+{
+  "plugin_id": "file-version",
+  "name": "Kairos go version",
+  "config": { "repo": "kairos-io/kairos", "ref": "main", "path": "go.mod", "key": "go" }
+}
+```
 
 ```json
 {

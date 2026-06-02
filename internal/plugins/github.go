@@ -57,6 +57,16 @@ type Asset struct {
 	DownloadCount      int    `json:"download_count"`
 }
 
+// OwnerAvatarURL returns the GitHub avatar image URL for a user or org login.
+// github.com/<owner>.png redirects to the current avatar and works unauthenticated,
+// so it can be used directly in an <img> tag.
+func OwnerAvatarURL(owner string) string {
+	if owner == "" {
+		return ""
+	}
+	return "https://github.com/" + owner + ".png?size=64"
+}
+
 // NormalizeRepo accepts "owner/repo" or a full GitHub URL and returns
 // owner, repo. It returns an error if the shape is unrecognized.
 func NormalizeRepo(s string) (owner, repo string, err error) {

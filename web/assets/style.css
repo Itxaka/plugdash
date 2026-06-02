@@ -1462,7 +1462,10 @@ pre.viz-raw {
   from { filter: hue-rotate(0deg); }
   to   { filter: hue-rotate(360deg); }
 }
-html.party body {
+/* Hue-cycle the content, not <body>: a filter on body would become the
+   containing block for the fixed confetti canvas and clip it to page height. */
+html.party .topbar,
+html.party .main {
   animation: pd-hue 6s linear infinite;
 }
 html.party .logo {
@@ -1508,4 +1511,15 @@ html.party .logo {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+/* Small repo/org avatar used in multi-repo list & checklist items. */
+.avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  object-fit: cover;
+  margin-top: 1px;
+  background: var(--bg-elev-2);
 }

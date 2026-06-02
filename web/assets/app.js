@@ -266,7 +266,9 @@ function renderList(data) {
       ? el("div", { class: "list-meta" }, metaChildren)
       : null;
 
-    wrap.appendChild(el("div", { class: "list-item" }, [mainCol, meta]));
+    const avatar = item.icon ? el("img", { class: "avatar", src: item.icon, loading: "lazy", alt: "" }) : null;
+
+    wrap.appendChild(el("div", { class: "list-item" }, [avatar, mainCol, meta]));
   }
   return wrap;
 }
@@ -344,12 +346,15 @@ function renderChecklist(data) {
       });
     }
 
+    const avatar = item.icon ? el("img", { class: "avatar", src: item.icon, loading: "lazy", alt: "" }) : null;
+
     frag.appendChild(
       el("div", { class: "check-item" }, [
         el("span", {
           class: "check-mark " + (ok ? "ok" : "no"),
           text: ok ? "✓" : "✗",
         }),
+        avatar,
         el("div", { class: "list-main" }, [
           labelEl,
           item.detail
@@ -777,6 +782,7 @@ function iconFor(pluginId) {
     "github-activity": { g: "📈", c: "#e3b341" },
     "github-activity-rate": { g: "📊", c: "#db61a2" },
     "github-issues": { g: "🐛", c: "#e5534b" },
+    "file-version": { g: "📄", c: "#8b949e" },
     "http-health": { g: "🌐", c: "#39c5cf" },
     "rss-feed": { g: "📡", c: "#f0883e" },
     "docker-image": { g: "🐳", c: "#2496ed" },
@@ -1737,8 +1743,13 @@ function setupKonami() {
 
 function triggerKonami() {
   const on = document.documentElement.classList.toggle("party");
-  confettiBurst();
-  toast(on ? "🎉 Party mode unlocked! ↑↑↓↓←→←→BA" : "Party mode off");
+  if (on) {
+    startConfetti();
+    toast("🎉 Party mode unlocked! ↑↑↓↓←→←→BA");
+  } else {
+    stopConfetti();
+    toast("Party mode off");
+  }
 }
 
 function toast(msg) {
@@ -1750,38 +1761,58 @@ function toast(msg) {
   }, 2400);
 }
 
-// confettiBurst draws a short, dependency-free confetti shower on a canvas.
-function confettiBurst() {
+// Continuous, dependency-free confetti that runs for as long as party mode is
+// on. startConfetti keeps emitting from the top; stopConfetti stops emitting
+// and lets the last pieces fall out before removing the canvas.
+const CONFETTI_COLORS = ["#5b9dff", "#3fb950", "#f85149", "#d29922", "#a371f7", "#2dd4bf", "#f0883e"];
+let confetti = null;
+
+function spawnConfetti(W) {
+  return {
+    x: Math.random() * W,
+    y: -20,
+    r: 4 + Math.random() * 5,
+    vx: (Math.random() - 0.5) * 3,
+    vy: 2 + Math.random() * 4.5,
+    rot: Math.random() * Math.PI,
+    vr: (Math.random() - 0.5) * 0.3,
+    color: CONFETTI_COLORS[(Math.random() * CONFETTI_COLORS.length) | 0],
+  };
+}
+
+function startConfetti() {
+  if (confetti) return; // already running
   const canvas = el("canvas", { class: "pd-confetti" });
   document.body.appendChild(canvas);
   const ctx = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
-  const W = window.innerWidth,
-    H = window.innerHeight;
-  canvas.width = W * dpr;
-  canvas.height = H * dpr;
-  ctx.scale(dpr, dpr);
+  const resize = () => {
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  resize();
+  window.addEventListener("resize", resize);
 
-  const colors = ["#5b9dff", "#3fb950", "#f85149", "#d29922", "#a371f7", "#2dd4bf", "#f0883e"];
-  const parts = [];
-  for (let i = 0; i < 180; i++) {
-    parts.push({
-      x: Math.random() * W,
-      y: -20 - Math.random() * H * 0.4,
-      r: 4 + Math.random() * 5,
-      vx: (Math.random() - 0.5) * 3,
-      vy: 2 + Math.random() * 4.5,
-      rot: Math.random() * Math.PI,
-      vr: (Math.random() - 0.5) * 0.3,
-      color: colors[(Math.random() * colors.length) | 0],
-    });
+  const state = { canvas, emitting: true, parts: [], resize };
+  confetti = state;
+
+  // Seed an initial burst.
+  for (let i = 0; i < 120; i++) {
+    const p = spawnConfetti(window.innerWidth);
+    p.y = -Math.random() * window.innerHeight;
+    state.parts.push(p);
   }
 
-  const start = performance.now();
-  function frame(now) {
-    const elapsed = now - start;
+  function frame() {
+    const W = window.innerWidth,
+      H = window.innerHeight;
     ctx.clearRect(0, 0, W, H);
-    for (const p of parts) {
+    if (state.emitting && state.parts.length < 320) {
+      for (let i = 0; i < 5; i++) state.parts.push(spawnConfetti(W));
+    }
+    state.parts = state.parts.filter((p) => p.y < H + 30);
+    for (const p of state.parts) {
       p.x += p.vx;
       p.y += p.vy;
       p.vy += 0.05;
@@ -1793,10 +1824,19 @@ function confettiBurst() {
       ctx.fillRect(-p.r / 2, -p.r / 2, p.r, p.r * 1.6);
       ctx.restore();
     }
-    if (elapsed < 3800) requestAnimationFrame(frame);
-    else canvas.remove();
+    if (state.emitting || state.parts.length > 0) {
+      state.raf = requestAnimationFrame(frame);
+    } else {
+      window.removeEventListener("resize", state.resize);
+      state.canvas.remove();
+      if (confetti === state) confetti = null;
+    }
   }
-  requestAnimationFrame(frame);
+  state.raf = requestAnimationFrame(frame);
+}
+
+function stopConfetti() {
+  if (confetti) confetti.emitting = false; // stop spawning; existing pieces fall out
 }
 
 /* ============================================================

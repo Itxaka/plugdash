@@ -67,6 +67,7 @@ type checkItem struct {
 	OK     bool        `json:"ok"`
 	Detail string      `json:"detail"`
 	URL    string      `json:"url,omitempty"`
+	Icon   string      `json:"icon,omitempty"`
 	Links  []checkLink `json:"links,omitempty"`
 }
 
@@ -147,13 +148,14 @@ func evalRepo(ctx context.Context, client *plugins.GHClient, raw, branch string)
 		return checkItem{Label: raw, OK: false, Detail: "invalid repo"}
 	}
 	label := owner + "/" + name
+	icon := plugins.OwnerAvatarURL(owner)
 
 	ref := branch
 	repoURL := fmt.Sprintf("https://github.com/%s/%s", owner, name)
 	if ref == "" {
 		var meta repoMeta
 		if err := client.Get(ctx, fmt.Sprintf("/repos/%s/%s", owner, name), &meta); err != nil {
-			return checkItem{Label: label, OK: false, Detail: "error: " + err.Error(), URL: repoURL}
+			return checkItem{Label: label, Icon: icon, OK: false, Detail: "error: " + err.Error(), URL: repoURL}
 		}
 		ref = meta.DefaultBranch
 		if meta.HTMLURL != "" {
@@ -164,18 +166,18 @@ func evalRepo(ctx context.Context, client *plugins.GHClient, raw, branch string)
 	var runs checkRunsResp
 	path := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs", owner, name, ref)
 	if err := client.Get(ctx, path, &runs); err != nil {
-		return checkItem{Label: label, OK: false, Detail: "error: " + err.Error(), URL: repoURL}
+		return checkItem{Label: label, Icon: icon, OK: false, Detail: "error: " + err.Error(), URL: repoURL}
 	}
 
-	return aggregate(label, repoURL, runs)
+	return aggregate(label, icon, repoURL, runs)
 }
 
 // aggregate turns a set of check runs into a single checklist item. The overall
 // ok/detail/url stay the birds-eye pass/fail aggregation; links is purely
 // additive, carrying one pill per check run for the UI to jump to a job.
-func aggregate(label, repoURL string, runs checkRunsResp) checkItem {
+func aggregate(label, icon, repoURL string, runs checkRunsResp) checkItem {
 	if runs.TotalCount == 0 {
-		return checkItem{Label: label, OK: false, Detail: "no checks", URL: repoURL}
+		return checkItem{Label: label, Icon: icon, OK: false, Detail: "no checks", URL: repoURL}
 	}
 
 	links := buildLinks(runs.CheckRuns)
@@ -197,17 +199,17 @@ func aggregate(label, repoURL string, runs checkRunsResp) checkItem {
 			if r.HTMLURL != "" {
 				url = r.HTMLURL
 			}
-			return checkItem{Label: label, OK: false, Detail: detail, URL: url, Links: links}
+			return checkItem{Label: label, Icon: icon, OK: false, Detail: detail, URL: url, Links: links}
 		}
 	}
 
 	for _, r := range runs.CheckRuns {
 		if r.Status != "completed" {
-			return checkItem{Label: label, OK: false, Detail: "running", URL: repoURL, Links: links}
+			return checkItem{Label: label, Icon: icon, OK: false, Detail: "running", URL: repoURL, Links: links}
 		}
 	}
 
-	return checkItem{Label: label, OK: true, Detail: "passing", URL: repoURL, Links: links}
+	return checkItem{Label: label, Icon: icon, OK: true, Detail: "passing", URL: repoURL, Links: links}
 }
 
 // buildLinks turns check runs into per-job links, one per run that has an
