@@ -66,10 +66,11 @@ type Engine struct {
 	lastPoll  time.Time // last cached-poll fallback request (counts as presence)
 	startedAt time.Time // when Start ran; anchors first-run stagger
 
-	sem    chan struct{}
-	wake   chan struct{} // nudge the scheduler (new subscriber / reconcile / force)
-	forceC chan int64
-	stop   chan struct{}
+	sem      chan struct{}
+	wake     chan struct{} // nudge the scheduler (new subscriber / reconcile / force)
+	forceC   chan int64
+	stop     chan struct{}
+	stopOnce sync.Once
 }
 
 // pollPresenceTTL is how long a cached-poll request keeps the engine considered
@@ -105,11 +106,53 @@ func (noopWriter) Write(p []byte) (int, error) { return len(p), nil }
 func (e *Engine) Start() {
 	e.startedAt = time.Now()
 	_ = e.Reconcile()
+	e.loadSnapshots()
 	go e.loop()
 }
 
-// Stop ends the scheduler loop.
-func (e *Engine) Stop() { close(e.stop) }
+// Stop ends the scheduler loop. Safe to call more than once.
+func (e *Engine) Stop() { e.stopOnce.Do(func() { close(e.stop) }) }
+
+// loadSnapshots warms the in-memory cache from the persisted snapshots so the
+// dashboard paints immediately after a restart, and — crucially — restores each
+// tracker's lastRun to its persisted fetched_at so a tracker is NOT considered
+// due again until its interval has genuinely elapsed. Without this, every
+// restart would re-run every tracker (a fresh upstream call) the moment a client
+// connects. Only snapshots for currently-known trackers are loaded.
+func (e *Engine) loadSnapshots() {
+	rows, err := e.store.LoadSnapshots()
+	if err != nil {
+		e.logger.Debug("load snapshots failed", "error", err.Error())
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	known := make(map[int64]bool, len(e.trackers))
+	for _, t := range e.trackers {
+		known[t.ID] = true
+	}
+	for _, r := range rows {
+		if !known[r.TrackerID] {
+			continue
+		}
+		snap := &Snapshot{
+			TrackerID:              r.TrackerID,
+			Name:                   r.Name,
+			PluginID:               r.PluginID,
+			RefreshIntervalSeconds: r.RefreshIntervalSeconds,
+			Error:                  r.Error,
+			FetchedAt:              r.FetchedAt,
+		}
+		if r.ResultJSON != "" {
+			var res plugin.Result
+			if err := json.Unmarshal([]byte(r.ResultJSON), &res); err == nil {
+				snap.Result = &res
+			}
+		}
+		e.snaps[r.TrackerID] = snap
+		e.lastRun[r.TrackerID] = r.FetchedAt
+	}
+}
 
 // clientCount returns the effective number of present clients: open SSE
 // subscribers plus a recent cached-poll fallback request.
@@ -275,7 +318,29 @@ func (e *Engine) runOne(t *store.Tracker) {
 	e.mu.Lock()
 	e.snaps[t.ID] = snap
 	e.mu.Unlock()
+	e.persist(snap)
 	e.broadcast(snap)
+}
+
+// persist writes the snapshot to the store so it survives a restart. Failures
+// are non-fatal: persistence is a warm-cache optimization, not correctness.
+func (e *Engine) persist(s *Snapshot) {
+	row := store.SnapshotRow{
+		TrackerID:              s.TrackerID,
+		PluginID:               s.PluginID,
+		Name:                   s.Name,
+		RefreshIntervalSeconds: s.RefreshIntervalSeconds,
+		Error:                  s.Error,
+		FetchedAt:              s.FetchedAt,
+	}
+	if s.Result != nil {
+		if b, err := json.Marshal(s.Result); err == nil {
+			row.ResultJSON = string(b)
+		}
+	}
+	if err := e.store.SaveSnapshot(row); err != nil {
+		e.logger.Debug("persist snapshot failed", "tracker_id", s.TrackerID, "error", err.Error())
+	}
 }
 
 func errString(err error) string {

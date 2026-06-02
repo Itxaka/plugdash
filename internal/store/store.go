@@ -89,6 +89,15 @@ CREATE TABLE IF NOT EXISTS trackers (
 CREATE TABLE IF NOT EXISTS settings (
 	id   INTEGER PRIMARY KEY CHECK (id = 1),
 	data TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS snapshots (
+	tracker_id INTEGER PRIMARY KEY REFERENCES trackers(id) ON DELETE CASCADE,
+	plugin_id  TEXT NOT NULL,
+	name       TEXT NOT NULL,
+	refresh_interval_seconds INTEGER NOT NULL DEFAULT 0,
+	result     TEXT NOT NULL DEFAULT '',
+	error      TEXT NOT NULL DEFAULT '',
+	fetched_at TIMESTAMP NOT NULL
 );`
 	if _, err := s.db.Exec(schema); err != nil {
 		return fmt.Errorf("migrate: %w", err)
@@ -323,6 +332,67 @@ func (s *Store) ReconcileFileTrackers(items []FileTracker) error {
 		return fmt.Errorf("commit reconcile: %w", err)
 	}
 	return nil
+}
+
+// SnapshotRow is a persisted latest tracker result — a warm cache that survives
+// restarts. It is exactly one row per tracker, overwritten on every run; this is
+// last-known state, not history (no time series is kept).
+type SnapshotRow struct {
+	TrackerID              int64
+	PluginID               string
+	Name                   string
+	RefreshIntervalSeconds int
+	// ResultJSON is the marshaled plugin result, empty when Error is set.
+	ResultJSON string
+	Error      string
+	FetchedAt  time.Time
+}
+
+// SaveSnapshot upserts the latest result for a tracker.
+func (s *Store) SaveSnapshot(r SnapshotRow) error {
+	_, err := s.db.Exec(
+		`INSERT INTO snapshots (tracker_id, plugin_id, name, refresh_interval_seconds, result, error, fetched_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(tracker_id) DO UPDATE SET
+		   plugin_id = excluded.plugin_id,
+		   name = excluded.name,
+		   refresh_interval_seconds = excluded.refresh_interval_seconds,
+		   result = excluded.result,
+		   error = excluded.error,
+		   fetched_at = excluded.fetched_at`,
+		r.TrackerID, r.PluginID, r.Name, r.RefreshIntervalSeconds,
+		r.ResultJSON, r.Error, r.FetchedAt.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return fmt.Errorf("save snapshot: %w", err)
+	}
+	return nil
+}
+
+// LoadSnapshots returns all persisted snapshots. Rows for deleted trackers are
+// removed automatically by the foreign-key cascade, so callers still filter to
+// the current tracker set defensively.
+func (s *Store) LoadSnapshots() ([]SnapshotRow, error) {
+	rows, err := s.db.Query(
+		`SELECT tracker_id, plugin_id, name, refresh_interval_seconds, result, error, fetched_at FROM snapshots`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("load snapshots: %w", err)
+	}
+	defer rows.Close()
+	var out []SnapshotRow
+	for rows.Next() {
+		var (
+			r       SnapshotRow
+			fetched string
+		)
+		if err := rows.Scan(&r.TrackerID, &r.PluginID, &r.Name, &r.RefreshIntervalSeconds, &r.ResultJSON, &r.Error, &fetched); err != nil {
+			return nil, err
+		}
+		r.FetchedAt = parseTime(fetched)
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // scanner abstracts *sql.Row and *sql.Rows for scanTracker.

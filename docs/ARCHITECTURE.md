@@ -154,9 +154,17 @@ cost of a busy dashboard is decoupled from the number of viewers.
   in-handler limits. A tracker already running is never double-started.
 - **Snapshot cache.** Each run produces a **`Snapshot`** (`{tracker_id, name, plugin_id,
   refresh_interval_seconds, result | error, fetched_at}`) stored in an in-memory map keyed by tracker
-  id. This is the *only* cache: the latest result per tracker, **no history** — fully consistent with
-  the just-in-time principle (still no time-series store; charts are reconstructed per run). All
-  clients read from this one cache, so **N clients = 1 upstream call** per tracker per interval.
+  id. This is the latest result per tracker, **no history** — fully consistent with the just-in-time
+  principle (still no time-series store; charts are reconstructed per run). All clients read from this
+  one cache, so **N clients = 1 upstream call** per tracker per interval.
+- **Warm restart (persistence).** Every snapshot is also written to a `snapshots` table (one row per
+  tracker, overwritten each run — last-known state, *not* history; rows cascade-delete with their
+  tracker). On `Start`, the engine loads them back into the cache **and restores each tracker's
+  `lastRun` from the persisted `fetched_at`**. So a restart paints the dashboard instantly from
+  last-known data and, crucially, does **not** re-run trackers whose interval hasn't elapsed —
+  avoiding a burst of fresh upstream calls on every redeploy/crashloop. (The ETag cache is not yet
+  persisted, so a tracker that *is* legitimately due after a long downtime makes a full call on its
+  next run rather than a free 304.)
 - **Presence-gating.** The scheduler only runs trackers while at least one client is **present**.
   Presence = an open SSE subscriber on `/api/stream`, **or** a cached-poll `GET /api/run` within the
   last **20s** (`pollPresenceTTL`, recorded by `Poll()`). With nobody watching, `clientCount()`
