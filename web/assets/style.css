@@ -21,6 +21,10 @@
   --red: #f85149;
   --yellow: #d29922;
   --pill-bg: #232b38;
+  /* Theme-varying surfaces (overridden by the light theme below). */
+  --card-top: #161b23; /* top of the card gradient */
+  --topbar-bg: rgba(10, 12, 16, 0.72);
+  --on-accent: #08111f; /* text/icon on an accent-filled surface */
   --radius: 14px;
   --radius-sm: 9px;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 28px rgba(0, 0, 0, 0.3);
@@ -29,6 +33,33 @@
     Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
     "Liberation Mono", monospace;
+}
+
+/* ---------- Light theme (toggled via html[data-theme="light"]) ---------- */
+html[data-theme="light"] {
+  --bg: #f6f8fa;
+  --bg-elev: #ffffff;
+  --bg-elev-2: #eef1f4;
+  --border: #d4dae1;
+  --border-soft: #e6eaee;
+  --border-strong: #c2cad3;
+  --text: #1f2328;
+  --text-muted: #57606a;
+  --text-dim: #818b97;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: rgba(37, 99, 235, 0.1);
+  --accent-glow: rgba(37, 99, 235, 0.3);
+  --green: #1a7f37;
+  --red: #cf222e;
+  --yellow: #9a6700;
+  --pill-bg: #eef1f4;
+  --card-top: #ffffff;
+  --topbar-bg: rgba(255, 255, 255, 0.78);
+  --on-accent: #ffffff;
+  --shadow: 0 1px 2px rgba(31, 35, 40, 0.08), 0 6px 20px rgba(31, 35, 40, 0.06);
+  --shadow-hover: 0 2px 4px rgba(31, 35, 40, 0.1), 0 14px 34px rgba(31, 35, 40, 0.1);
+  color-scheme: light;
 }
 
 * {
@@ -101,7 +132,7 @@ body {
   justify-content: space-between;
   gap: 24px;
   padding: 13px 24px;
-  background: rgba(10, 12, 16, 0.72);
+  background: var(--topbar-bg);
   backdrop-filter: blur(16px) saturate(160%);
   -webkit-backdrop-filter: blur(16px) saturate(160%);
   border-bottom: 1px solid var(--border-soft);
@@ -126,7 +157,7 @@ body {
 .nav {
   display: flex;
   gap: 4px;
-  background: rgba(20, 24, 31, 0.7);
+  background: var(--bg-elev-2);
   border: 1px solid var(--border-soft);
   padding: 4px;
   border-radius: 12px;
@@ -236,7 +267,7 @@ body {
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #08111f;
+  color: var(--on-accent);
   font-weight: 650;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.15) inset,
     0 4px 14px rgba(91, 157, 255, 0.25);
@@ -337,7 +368,7 @@ body {
 
 .switch input:checked + .switch-track .switch-thumb {
   transform: translateX(18px);
-  background: #08111f;
+  background: var(--on-accent);
 }
 
 .switch input:focus-visible + .switch-track {
@@ -724,7 +755,7 @@ body {
 
 .card {
   position: relative;
-  background: linear-gradient(180deg, #161b23 0%, var(--bg-elev) 60%);
+  background: linear-gradient(180deg, var(--card-top) 0%, var(--bg-elev) 60%);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -1419,4 +1450,62 @@ pre.viz-raw {
   .loading-text::after {
     animation: none;
   }
+}
+
+/* ---------- theme toggle ---------- */
+.theme-toggle {
+  font-size: 16px;
+}
+
+/* ---------- Konami "party mode" + confetti + toast ---------- */
+@keyframes pd-hue {
+  from { filter: hue-rotate(0deg); }
+  to   { filter: hue-rotate(360deg); }
+}
+html.party body {
+  animation: pd-hue 6s linear infinite;
+}
+html.party .logo {
+  animation: pd-hue 2s linear infinite;
+}
+
+.pd-confetti {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.pd-toast {
+  position: fixed;
+  bottom: 26px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-elev-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-hover);
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-weight: 600;
+  z-index: 10000;
+  animation: pd-toast-in 0.2s ease both;
+}
+.pd-toast.out {
+  animation: pd-toast-out 0.4s ease both;
+}
+@keyframes pd-toast-in {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+@keyframes pd-toast-out {
+  to { opacity: 0; transform: translate(-50%, 12px); }
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }

@@ -4,6 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>plugdash</title>
+  <!-- Apply the saved theme before first paint to avoid a flash.
+       A ?theme=light|dark query param overrides and is persisted. -->
+  <script>
+    try {
+      var q = new URLSearchParams(location.search).get("theme");
+      var t = q || localStorage.getItem("plugdash:theme");
+      if (t === "light") document.documentElement.dataset.theme = "light";
+      if (q) localStorage.setItem("plugdash:theme", q);
+    } catch (e) {}
+  </script>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -12,12 +22,15 @@
       <span class="logo">◈</span>
       <span>plugdash</span>
     </div>
-    <nav class="nav" id="nav">
-      <button class="nav-btn active" data-view="dashboard">Dashboard</button>
-      <button class="nav-btn" data-view="configure">Trackers</button>
-      <button class="nav-btn" data-view="settings">Settings</button>
-      <button class="nav-btn" data-view="logs">Logs</button>
-    </nav>
+    <div class="topbar-right">
+      <nav class="nav" id="nav">
+        <button class="nav-btn active" data-view="dashboard">Dashboard</button>
+        <button class="nav-btn" data-view="configure">Trackers</button>
+        <button class="nav-btn" data-view="settings">Settings</button>
+        <button class="nav-btn" data-view="logs">Logs</button>
+      </nav>
+      <button class="icon-btn theme-toggle" id="theme-toggle" title="Toggle light / dark theme">🌙</button>
+    </div>
   </header>
 
   <main id="main" class="main"></main>

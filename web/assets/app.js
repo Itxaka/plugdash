@@ -1676,6 +1676,130 @@ function renderLogEntry(e) {
 }
 
 /* ============================================================
+   Theme (dark / light)
+   ============================================================ */
+const THEME_KEY = "plugdash:theme";
+
+function currentTheme() {
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+function applyTheme(t) {
+  if (t === "light") document.documentElement.dataset.theme = "light";
+  else delete document.documentElement.dataset.theme;
+  const btn = document.getElementById("theme-toggle");
+  if (btn) btn.textContent = t === "light" ? "☀️" : "🌙";
+  try {
+    localStorage.setItem(THEME_KEY, t);
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+function setupTheme() {
+  applyTheme(currentTheme()); // sync the toggle icon with the pre-paint state
+  const btn = document.getElementById("theme-toggle");
+  if (btn) {
+    btn.addEventListener("click", () =>
+      applyTheme(currentTheme() === "light" ? "dark" : "light")
+    );
+  }
+}
+
+/* ============================================================
+   Konami code easter egg (on the Settings page) → party mode + confetti
+   ============================================================ */
+const KONAMI = [
+  "ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown",
+  "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a",
+];
+let konamiPos = 0;
+
+function setupKonami() {
+  document.addEventListener("keydown", (e) => {
+    // Only armed on the Settings page.
+    if (currentView !== "settings") {
+      konamiPos = 0;
+      return;
+    }
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    if (k === KONAMI[konamiPos]) {
+      konamiPos++;
+      if (konamiPos === KONAMI.length) {
+        konamiPos = 0;
+        triggerKonami();
+      }
+    } else {
+      konamiPos = k === KONAMI[0] ? 1 : 0;
+    }
+  });
+}
+
+function triggerKonami() {
+  const on = document.documentElement.classList.toggle("party");
+  confettiBurst();
+  toast(on ? "🎉 Party mode unlocked! ↑↑↓↓←→←→BA" : "Party mode off");
+}
+
+function toast(msg) {
+  const t = el("div", { class: "pd-toast", text: msg });
+  document.body.appendChild(t);
+  setTimeout(() => {
+    t.classList.add("out");
+    setTimeout(() => t.remove(), 400);
+  }, 2400);
+}
+
+// confettiBurst draws a short, dependency-free confetti shower on a canvas.
+function confettiBurst() {
+  const canvas = el("canvas", { class: "pd-confetti" });
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const W = window.innerWidth,
+    H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
+
+  const colors = ["#5b9dff", "#3fb950", "#f85149", "#d29922", "#a371f7", "#2dd4bf", "#f0883e"];
+  const parts = [];
+  for (let i = 0; i < 180; i++) {
+    parts.push({
+      x: Math.random() * W,
+      y: -20 - Math.random() * H * 0.4,
+      r: 4 + Math.random() * 5,
+      vx: (Math.random() - 0.5) * 3,
+      vy: 2 + Math.random() * 4.5,
+      rot: Math.random() * Math.PI,
+      vr: (Math.random() - 0.5) * 0.3,
+      color: colors[(Math.random() * colors.length) | 0],
+    });
+  }
+
+  const start = performance.now();
+  function frame(now) {
+    const elapsed = now - start;
+    ctx.clearRect(0, 0, W, H);
+    for (const p of parts) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.05;
+      p.rot += p.vr;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.r / 2, -p.r / 2, p.r, p.r * 1.6);
+      ctx.restore();
+    }
+    if (elapsed < 3800) requestAnimationFrame(frame);
+    else canvas.remove();
+  }
+  requestAnimationFrame(frame);
+}
+
+/* ============================================================
    Router / nav
    ============================================================ */
 const VIEWS = ["dashboard", "configure", "settings", "logs"];
@@ -1715,4 +1839,6 @@ window.addEventListener("hashchange", () => {
 });
 
 // initial — honor a deep-linked view in the URL hash.
+setupTheme();
+setupKonami();
 setView(location.hash.slice(1) || "dashboard");
