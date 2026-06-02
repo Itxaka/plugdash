@@ -1,0 +1,15 @@
+# Build output
+/bin/
+plugdash
+
+# SQLite database files
+*.db
+*.db-wal
+*.db-shm
+
+# Editor / OS cruft
+.DS_Store
+*.swp
+
+# Temp
+/tmp

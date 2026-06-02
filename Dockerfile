@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1
+
+# --- Builder stage ---
+# Pinned to the build platform so multi-arch builds cross-compile (fast) instead
+# of emulating the target under QEMU.
+FROM --platform=$BUILDPLATFORM golang:1.25 AS build
+
+WORKDIR /src
+
+# Download dependencies first for better layer caching.
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Build a fully static binary (pure-Go SQLite, so CGO can stay off). TARGETOS /
+# TARGETARCH are provided automatically by buildx for the requested platform.
+COPY . .
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags="-s -w" -o /plugdash ./cmd/plugdash
+
+# --- Final stage ---
+FROM gcr.io/distroless/static-debian12
+
+LABEL org.opencontainers.image.title="plugdash" \
+      org.opencontainers.image.description="A small, self-contained plugin dashboard (CI status, releases, activity, issues, image checks)."
+
+# The SQLite database lives here; mount a volume to persist it.
+WORKDIR /data
+VOLUME ["/data"]
+
+COPY --from=build /plugdash /plugdash
+
+EXPOSE 8080
+
+# External plugins: drop executables into this dir (it defaults under /data so a
+# single mounted volume persists both the DB and any plugins).
+ENV PLUGDASH_PLUGINS_DIR=/data/plugins
+
+ENTRYPOINT ["/plugdash"]
+CMD ["-addr", ":8080", "-db", "/data/plugdash.db"]

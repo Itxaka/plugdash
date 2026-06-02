@@ -1,0 +1,420 @@
+// Package server exposes the plugdash HTTP API and serves the static frontend.
+package server
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"io"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"plugdash/internal/plugin"
+	"plugdash/internal/store"
+)
+
+// PluginRescanner re-discovers external plugins on demand. The external plugin
+// manager satisfies it; the server only needs this narrow view, so it avoids
+// importing the extplugin package.
+type PluginRescanner interface {
+	Rescan() (added, removed int, err error)
+	Dir() string
+}
+
+// externalMarker is implemented by external plugins so the server can flag them
+// in the API without importing the extplugin package.
+type externalMarker interface {
+	IsExternal() bool
+}
+
+// Server wires the registry, store and static assets into an http.Handler.
+type Server struct {
+	reg       *plugin.Registry
+	store     *store.Store
+	static    fs.FS
+	mux       *http.ServeMux
+	rescanner PluginRescanner
+	logger    *slog.Logger
+	logs      *LogRing
+	level     *slog.LevelVar
+}
+
+// New builds a Server. static is the filesystem containing the frontend assets
+// (typically an embedded web/ directory).
+func New(reg *plugin.Registry, st *store.Store, static fs.FS) *Server {
+	s := &Server{
+		reg:    reg,
+		store:  st,
+		static: static,
+		mux:    http.NewServeMux(),
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)), // overridden via SetLogger
+	}
+	s.routes()
+	return s
+}
+
+// SetLogging wires the structured logger, its in-memory ring (served at
+// /api/logs), and the dynamic level (toggled by the debug setting).
+func (s *Server) SetLogging(logger *slog.Logger, ring *LogRing, level *slog.LevelVar) {
+	if logger != nil {
+		s.logger = logger
+	}
+	s.logs = ring
+	s.level = level
+}
+
+// runCtx attaches a tracker-scoped logger to ctx so the plugin and the shared
+// HTTP/registry helpers log under the tracker's identity.
+func (s *Server) runCtx(ctx context.Context, t *store.Tracker) context.Context {
+	return plugin.WithLogger(ctx, s.logger.With("tracker_id", t.ID, "plugin", t.PluginID, "tracker", t.Name))
+}
+
+// applyDebugLevel flips the dynamic log level when the debug setting changes.
+func (s *Server) applyDebugLevel(debug bool) {
+	if s.level == nil {
+		return
+	}
+	if debug {
+		s.level.Set(slog.LevelDebug)
+	} else {
+		s.level.Set(slog.LevelInfo)
+	}
+}
+
+// ServeHTTP implements http.Handler.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+
+// SetPluginRescanner wires in the external plugin manager so /api/plugins/rescan
+// can trigger a re-scan. If never set, that endpoint reports external plugins
+// are not enabled.
+func (s *Server) SetPluginRescanner(p PluginRescanner) { s.rescanner = p }
+
+func (s *Server) routes() {
+	s.mux.HandleFunc("GET /api/plugins", s.handleListPlugins)
+	s.mux.HandleFunc("POST /api/plugins/rescan", s.handleRescanPlugins)
+	s.mux.HandleFunc("GET /api/trackers", s.handleListTrackers)
+	s.mux.HandleFunc("POST /api/trackers", s.handleCreateTracker)
+	s.mux.HandleFunc("PUT /api/trackers/{id}", s.handleUpdateTracker)
+	s.mux.HandleFunc("DELETE /api/trackers/{id}", s.handleDeleteTracker)
+	s.mux.HandleFunc("GET /api/trackers/{id}/run", s.handleRunTracker)
+	s.mux.HandleFunc("GET /api/run", s.handleRunAll)
+	s.mux.HandleFunc("GET /api/settings", s.handleGetSettings)
+	s.mux.HandleFunc("PUT /api/settings", s.handleSaveSettings)
+	s.mux.HandleFunc("GET /api/logs", s.handleGetLogs)
+	s.mux.HandleFunc("DELETE /api/logs", s.handleClearLogs)
+	s.mux.Handle("/", http.FileServer(http.FS(s.static)))
+}
+
+// --- plugins ---
+
+type pluginDTO struct {
+	ID                     string               `json:"id"`
+	Name                   string               `json:"name"`
+	Description            string               `json:"description"`
+	RefreshIntervalSeconds int                  `json:"refresh_interval_seconds"`
+	External               bool                 `json:"external"`
+	Schema                 []plugin.ConfigField `json:"schema"`
+}
+
+func (s *Server) handleListPlugins(w http.ResponseWriter, r *http.Request) {
+	plugins := s.reg.List()
+	out := make([]pluginDTO, 0, len(plugins))
+	for _, p := range plugins {
+		external := false
+		if em, ok := p.(externalMarker); ok {
+			external = em.IsExternal()
+		}
+		out = append(out, pluginDTO{
+			ID:                     p.ID(),
+			Name:                   p.Name(),
+			Description:            p.Description(),
+			RefreshIntervalSeconds: int(p.RefreshInterval().Seconds()),
+			External:               external,
+			Schema:                 p.ConfigSchema(),
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleRescanPlugins(w http.ResponseWriter, r *http.Request) {
+	if s.rescanner == nil {
+		writeError(w, http.StatusNotImplemented, "external plugins are not enabled")
+		return
+	}
+	added, removed, err := s.rescanner.Rescan()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"added":   added,
+		"removed": removed,
+		"dir":     s.rescanner.Dir(),
+	})
+}
+
+// --- logs ---
+
+func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
+	if s.logs == nil {
+		writeJSON(w, http.StatusOK, []LogEntry{})
+		return
+	}
+	entries := s.logs.Entries()
+	debug := s.level != nil && s.level.Level() <= slog.LevelDebug
+	writeJSON(w, http.StatusOK, map[string]any{
+		"debug":   debug,
+		"entries": entries,
+	})
+}
+
+func (s *Server) handleClearLogs(w http.ResponseWriter, r *http.Request) {
+	if s.logs != nil {
+		s.logs.Clear()
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- settings ---
+
+func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
+	settings, err := s.store.GetSettings()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *Server) handleSaveSettings(w http.ResponseWriter, r *http.Request) {
+	var in store.Settings
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	saved, err := s.store.SaveSettings(in)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.applyDebugLevel(saved.Debug)
+	// A globally-configured token becomes GITHUB_TOKEN for all GitHub plugins.
+	if saved.GitHubToken != "" {
+		_ = os.Setenv("GITHUB_TOKEN", saved.GitHubToken)
+	}
+	// Emit an immediate entry so the Logs tab visibly reflects the change without
+	// waiting for the next tracker run (Info is captured at both levels).
+	s.logger.Info("settings updated", "debug", saved.Debug, "autorefresh", saved.AutoRefreshEnabled, "github_token_set", saved.GitHubToken != "")
+	writeJSON(w, http.StatusOK, saved)
+}
+
+// --- trackers ---
+
+func (s *Server) handleListTrackers(w http.ResponseWriter, r *http.Request) {
+	trackers, err := s.store.ListTrackers()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if trackers == nil {
+		trackers = []*store.Tracker{}
+	}
+	writeJSON(w, http.StatusOK, trackers)
+}
+
+type createTrackerReq struct {
+	PluginID               string         `json:"plugin_id"`
+	Name                   string         `json:"name"`
+	Config                 map[string]any `json:"config"`
+	RefreshIntervalSeconds int            `json:"refresh_interval_seconds"`
+}
+
+func (s *Server) handleCreateTracker(w http.ResponseWriter, r *http.Request) {
+	var req createTrackerReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.PluginID) == "" {
+		writeError(w, http.StatusBadRequest, "plugin_id is required")
+		return
+	}
+	if _, ok := s.reg.Get(req.PluginID); !ok {
+		writeError(w, http.StatusBadRequest, "unknown plugin: "+req.PluginID)
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		req.Name = req.PluginID
+	}
+	t, err := s.store.CreateTracker(req.PluginID, req.Name, req.Config, req.RefreshIntervalSeconds)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, t)
+}
+
+func (s *Server) handleUpdateTracker(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req createTrackerReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		// Keep the existing name rather than blanking it.
+		if existing, gerr := s.store.GetTracker(id); gerr == nil {
+			name = existing.Name
+		}
+	}
+	t, err := s.store.UpdateTracker(id, name, req.Config, req.RefreshIntervalSeconds)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "tracker not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (s *Server) handleDeleteTracker(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	if err := s.store.DeleteTracker(id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "tracker not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// runResponse carries either a plugin Result or an error string for a single
+// tracker run.
+type runResponse struct {
+	TrackerID              int64          `json:"tracker_id"`
+	Name                   string         `json:"name"`
+	PluginID               string         `json:"plugin_id"`
+	RefreshIntervalSeconds int            `json:"refresh_interval_seconds"`
+	Result                 *plugin.Result `json:"result,omitempty"`
+	Error                  string         `json:"error,omitempty"`
+}
+
+func (s *Server) handleRunTracker(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	t, err := s.store.GetTracker(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "tracker not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp := runTracker(s.runCtx(r.Context(), t), s.reg, t)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// handleRunAll runs every configured tracker concurrently and returns their
+// results in a single JSON array. Concurrency is capped so a large number of
+// trackers does not open an unbounded number of goroutines or connections.
+// Results preserve tracker order; per-tracker failures are captured in each
+// runResponse rather than failing the whole request.
+func (s *Server) handleRunAll(w http.ResponseWriter, r *http.Request) {
+	trackers, err := s.store.ListTrackers()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	results := make([]runResponse, len(trackers))
+
+	const maxConcurrent = 8
+	sem := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
+	for i, t := range trackers {
+		wg.Add(1)
+		go func(i int, t *store.Tracker) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			results[i] = runTracker(s.runCtx(r.Context(), t), s.reg, t)
+		}(i, t)
+	}
+	wg.Wait()
+
+	writeJSON(w, http.StatusOK, results)
+}
+
+// runTracker executes a single tracker, capturing any error into the response
+// rather than failing the whole request. It applies a per-run timeout.
+func runTracker(ctx context.Context, reg *plugin.Registry, t *store.Tracker) runResponse {
+	resp := runResponse{TrackerID: t.ID, Name: t.Name, PluginID: t.PluginID}
+	p, ok := reg.Get(t.PluginID)
+	if !ok {
+		resp.Error = "plugin not found: " + t.PluginID
+		return resp
+	}
+	// Effective cadence: the tracker's override if set, else the plugin default.
+	if t.RefreshIntervalSeconds > 0 {
+		resp.RefreshIntervalSeconds = t.RefreshIntervalSeconds
+	} else {
+		resp.RefreshIntervalSeconds = int(p.RefreshInterval().Seconds())
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	log := plugin.LoggerFrom(ctx)
+	start := time.Now()
+	log.Debug("tracker run start")
+	res, err := p.Run(ctx, plugin.Config(t.Config))
+	log.Debug("tracker run done", "ms", time.Since(start).Milliseconds(), "error", errString(err))
+	if err != nil {
+		resp.Error = err.Error()
+		return resp
+	}
+	resp.Result = &res
+	return resp
+}
+
+// --- helpers ---
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+// errString renders an error for structured logging, "" when nil.
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
