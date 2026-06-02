@@ -3,7 +3,7 @@
 # --- Builder stage ---
 # Pinned to the build platform so multi-arch builds cross-compile (fast) instead
 # of emulating the target under QEMU.
-FROM --platform=$BUILDPLATFORM golang:1.25 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26 AS build
 
 WORKDIR /src
 
