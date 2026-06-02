@@ -1,6 +1,7 @@
 # Build output
 /bin/
-plugdash
+/plugdash
+/dist/
 
 # SQLite database files
 *.db
