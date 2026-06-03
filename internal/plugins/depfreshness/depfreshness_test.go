@@ -208,9 +208,17 @@ func TestVersionStatus(t *testing.T) {
 		t.Error("equal should be current")
 	}
 	if versionStatus("1.2.3", "1.4.0") != statusMinor {
-		t.Error("same major should be minor")
+		t.Error("same major, behind should be minor")
 	}
 	if versionStatus("0.5.0", "1.0.0") != statusMajor {
-		t.Error("differing major should be major")
+		t.Error("behind by a major should be major")
+	}
+	// Ahead of (or equal to) the proxy's latest is NOT behind — e.g. a
+	// vX+incompatible module whose @latest is an older base-path tag.
+	if versionStatus("3.0.0+incompatible", "2.7.0+incompatible") != statusCurrent {
+		t.Error("ahead should be current, not behind")
+	}
+	if versionStatus("1.5.0", "1.2.0") != statusCurrent {
+		t.Error("ahead within major should be current")
 	}
 }

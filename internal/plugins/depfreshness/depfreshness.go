@@ -266,33 +266,66 @@ const (
 	statusMajor
 )
 
-// versionStatus compares two normalized versions: equal -> current, differing
-// major -> major, otherwise minor/patch behind.
+// versionStatus compares two normalized versions numerically:
+//   - current at or ahead of latest -> current (e.g. a vX+incompatible module
+//     whose proxy @latest is an older base-path tag is NOT "behind");
+//   - behind by a major -> major;
+//   - behind within the same major -> minor/patch.
+//
+// When either side can't be parsed it falls back to string equality.
 func versionStatus(cur, lat string) int {
 	if cur == lat || lat == "" {
 		return statusCurrent
 	}
-	cm, co := majorOf(cur)
-	lm, lo := majorOf(lat)
-	if co && lo && cm != lm {
+	pc, ok1 := parseSemver(cur)
+	pl, ok2 := parseSemver(lat)
+	if !ok1 || !ok2 {
+		return statusMinor // differing strings, can't tell — assume slightly behind
+	}
+	if cmpSemver(pc, pl) >= 0 {
+		return statusCurrent // equal or ahead
+	}
+	if pc[0] < pl[0] {
 		return statusMajor
 	}
 	return statusMinor
 }
 
-func majorOf(v string) (int, bool) {
-	if v == "" {
-		return 0, false
+// parseSemver extracts up to major.minor.patch from a version, ignoring any
+// pre-release / build / +incompatible suffix. ok is false if no leading number.
+func parseSemver(v string) ([3]int, bool) {
+	core := v
+	if i := strings.IndexAny(core, "+-"); i >= 0 {
+		core = core[:i]
 	}
-	part := v
-	if i := strings.IndexByte(v, '.'); i >= 0 {
-		part = v[:i]
+	var out [3]int
+	parts := strings.Split(core, ".")
+	got := false
+	for i := 0; i < len(parts) && i < 3; i++ {
+		n, err := strconv.Atoi(strings.TrimSpace(parts[i]))
+		if err != nil {
+			if i == 0 {
+				return out, false
+			}
+			break
+		}
+		out[i] = n
+		got = true
 	}
-	n, err := strconv.Atoi(part)
-	if err != nil {
-		return 0, false
+	return out, got
+}
+
+// cmpSemver returns -1, 0 or 1 comparing two parsed [major,minor,patch].
+func cmpSemver(a, b [3]int) int {
+	for i := range 3 {
+		if a[i] < b[i] {
+			return -1
+		}
+		if a[i] > b[i] {
+			return 1
+		}
 	}
-	return n, true
+	return 0
 }
 
 // normVersion strips a leading v and common range operators for comparison.
