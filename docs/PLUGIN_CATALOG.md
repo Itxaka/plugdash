@@ -52,6 +52,8 @@ plugdash Settings UI is exported into `GITHUB_TOKEN` at startup (see
 | `github-issues` | list | 15m | Latest open issues needing a first reply across repos |
 | `github-issue-watch` | list | 15m | Specific issues/PRs: answered state, time since last reply, CI status |
 | `github-prs` | list | 5m | Open PRs across repos with review state, CI status and draft flag |
+| `endoflife` | list | 24h | End-of-life / support countdown for languages, runtimes and OSes |
+| `osv-vulns` | list | 6h | Known vulnerabilities for a package version (OSV.dev) |
 | `file-version` | stat | 1h | Value of a variable in a file on a repo branch (e.g. a pinned dependency) |
 
 ---
@@ -453,6 +455,74 @@ showing the **review state**, **CI status**, and a **draft** flag.
   "config": {
     "repos": "kairos-io/kairos\nkairos-io/immucore",
     "reviewer": "octocat"
+  }
+}
+```
+
+---
+
+## End-of-Life — `endoflife` (visualization: `list`)
+
+Track end-of-life / support dates for the languages, runtimes, databases and
+operating systems in your stack, via the free [endoflife.date](https://endoflife.date)
+API. No authentication required.
+
+**Default refresh interval:** 24h
+
+| Key | Label | Type | Required | Default | Notes |
+|-----|-------|------|----------|---------|-------|
+| `products` | Products | list | yes | — | One endoflife.date product per line (e.g. `go`, `nodejs`, `kubernetes`, `ubuntu`, `python`). Append `@cycle` to pin a release, e.g. `kubernetes@1.29` |
+
+**Behaviors:**
+
+- For each product, the cycle is chosen by the optional `@cycle`, else the newest
+  cycle that is **not yet end-of-life** (falling back to the newest overall).
+- Badge: `EOL` (red) when the cycle is past its date, `EOL soon` (amber) when EOL
+  is within 90 days, `supported` (green) otherwise. The row date shows when EOL
+  hits. The title summarizes how many tracked products need attention.
+- An unknown product slug or a missing pinned cycle renders as an `error` row.
+
+```json
+{
+  "plugin_id": "endoflife",
+  "name": "Stack EOL",
+  "config": {
+    "products": "go\nnodejs\nkubernetes@1.29\nubuntu@22.04"
+  }
+}
+```
+
+---
+
+## Vulnerability Check — `osv-vulns` (visualization: `list`)
+
+List known vulnerabilities affecting a specific package version, from the free
+[OSV.dev](https://osv.dev) database. No authentication required.
+
+**Default refresh interval:** 6h
+
+| Key | Label | Type | Required | Default | Notes |
+|-----|-------|------|----------|---------|-------|
+| `ecosystem` | Ecosystem | select | yes | `Go` | Go, npm, PyPI, crates.io, Maven, NuGet, RubyGems, Packagist, Hex, Pub |
+| `package` | Package | string | yes | — | Package name in the ecosystem (e.g. a Go module path or npm name) |
+| `version` | Version | string | yes | — | Exact version to check |
+
+**Behaviors:**
+
+- Queries OSV for `package@version` in the chosen ecosystem. With no advisories,
+  a single green `clean` row is shown; otherwise one row per advisory.
+- Each advisory row links to its `osv.dev` page; the badge prefers a `CVE-…`
+  alias, falling back to `vuln`. The summary (or first line of the details) is the
+  subtitle.
+
+```json
+{
+  "plugin_id": "osv-vulns",
+  "name": "stdlib net/http",
+  "config": {
+    "ecosystem": "Go",
+    "package": "stdlib",
+    "version": "1.21.0"
   }
 }
 ```

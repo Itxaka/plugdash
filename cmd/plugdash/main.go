@@ -15,6 +15,7 @@ import (
 	"plugdash/internal/extplugin"
 	"plugdash/internal/plugin"
 	"plugdash/internal/plugins/dockerimage"
+	"plugdash/internal/plugins/eol"
 	"plugdash/internal/plugins/fileversion"
 	"plugdash/internal/plugins/githubactions"
 	"plugdash/internal/plugins/githubartifacts"
@@ -26,6 +27,7 @@ import (
 	"plugdash/internal/plugins/githubrepostats"
 	"plugdash/internal/plugins/githubstars"
 	"plugdash/internal/plugins/httphealth"
+	"plugdash/internal/plugins/osvvulns"
 	"plugdash/internal/plugins/rssfeed"
 	"plugdash/internal/server"
 	"plugdash/internal/store"
@@ -127,6 +129,8 @@ func main() {
 	reg.Register(githubissues.New())
 	reg.Register(githubissuewatch.New())
 	reg.Register(githubprs.New())
+	reg.Register(eol.New())
+	reg.Register(osvvulns.New())
 	reg.Register(fileversion.New())
 
 	srv := server.New(reg, st, web.FS())
