@@ -68,11 +68,8 @@ func TestRunBuildsSuccessRateAndDurationSeries(t *testing.T) {
 
 	d := decodeData(t, res)
 
-	if d.Label != "Run duration (min)" {
-		t.Errorf("label = %q, want %q", d.Label, "Run duration (min)")
-	}
-	if d.Unit != "min" {
-		t.Errorf("unit = %q, want %q", d.Unit, "min")
+	if d.Label != "% success" {
+		t.Errorf("label = %q, want %q", d.Label, "% success")
 	}
 
 	// 2/3 success -> ~66.67%.

@@ -549,6 +549,8 @@ Compare a repository's **direct** dependencies against their latest published
 versions. Reads a `go.mod` or `package.json` from a branch, then queries the Go
 module proxy / npm registry. Public repos need no authentication.
 
+![Dependency Freshness widget](images/plugins/dependency-freshness.png)
+
 **Default refresh interval:** 24h
 
 | Key | Label | Type | Required | Default | Notes |
@@ -569,6 +571,8 @@ requires are skipped. The title summarizes how many are outdated.
 
 Show how complete a GitHub milestone is, as a progress gauge.
 
+![Milestone Progress widget](images/plugins/github-milestone.png)
+
 **Default refresh interval:** 30m
 
 | Key | Label | Type | Required | Default | Notes |
@@ -586,6 +590,8 @@ shows open/closed counts and the due date.
 ## Workflow Health — `github-workflow-health` (visualization: `timeseries`)
 
 CI success rate and run-duration trend for a repository's GitHub Actions.
+
+![Workflow Health widget](images/plugins/github-workflow-health.png)
 
 **Default refresh interval:** 30m
 
@@ -624,6 +630,8 @@ avatar.
 ## Stale Items — `github-stale` (visualization: `list`)
 
 Open issues/PRs with no activity for more than N days, across repos (search API).
+
+![Stale Items widget](images/plugins/github-stale.png)
 
 **Default refresh interval:** 1h
 

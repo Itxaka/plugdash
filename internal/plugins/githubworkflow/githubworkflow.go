@@ -184,8 +184,10 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 		Visualization: plugin.VizTimeseries,
 		Title:         title,
 		Data: timeseriesData{
-			Label:  "Run duration (min)",
-			Unit:   "min",
+			// The headline number is the success rate; the line is the per-run
+			// duration trend (minutes), so the label describes the headline.
+			Label:  "% success",
+			Unit:   "",
 			Total:  successRate,
 			Points: points,
 		},

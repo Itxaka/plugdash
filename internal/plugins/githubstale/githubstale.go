@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -120,31 +121,50 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 
 	cutoff := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
 
-	q := "is:open"
-	switch itemType {
-	case "issue":
-		q += " is:issue"
-	case "pr":
-		q += " is:pr"
-	}
-	q += " updated:<" + cutoff
+	// The /search/issues API now requires the query to name a type — "is:issue"
+	// or "is:pull-request". For "any" we run both and merge, since there is no
+	// single token meaning "either".
+	base := "is:open updated:<" + cutoff
 	for _, raw := range repos {
 		owner, name, err := plugins.NormalizeRepo(raw)
 		if err != nil {
 			continue
 		}
-		q += " repo:" + owner + "/" + name
+		base += " repo:" + owner + "/" + name
+	}
+
+	var typeTokens []string
+	switch itemType {
+	case "issue":
+		typeTokens = []string{"is:issue"}
+	case "pr":
+		typeTokens = []string{"is:pull-request"}
+	default:
+		typeTokens = []string{"is:issue", "is:pull-request"}
 	}
 
 	client := plugins.NewGHClient(cfg.String("token"))
 
-	path := fmt.Sprintf("/search/issues?q=%s&per_page=%d&sort=updated&order=asc", url.QueryEscape(q), count)
-	var result searchResult
-	if err := client.Get(ctx, path, &result); err != nil {
-		return plugin.Result{}, err
+	var results []searchItem
+	seen := map[string]bool{}
+	for _, tok := range typeTokens {
+		q := base + " " + tok
+		path := fmt.Sprintf("/search/issues?q=%s&per_page=%d&sort=updated&order=asc", url.QueryEscape(q), count)
+		var result searchResult
+		if err := client.Get(ctx, path, &result); err != nil {
+			return plugin.Result{}, err
+		}
+		for _, it := range result.Items {
+			if seen[it.HTMLURL] {
+				continue
+			}
+			seen[it.HTMLURL] = true
+			results = append(results, it)
+		}
 	}
 
-	results := result.Items
+	// Most-stale (oldest-updated) first across the merged set.
+	sort.Slice(results, func(i, j int) bool { return results[i].UpdatedAt.Before(results[j].UpdatedAt) })
 	if len(results) > count {
 		results = results[:count]
 	}
