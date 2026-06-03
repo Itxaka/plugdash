@@ -30,6 +30,9 @@ func (p *Plugin) Description() string {
 // RefreshInterval defaults to 10m: review queues move at a moderate pace.
 func (p *Plugin) RefreshInterval() time.Duration { return 10 * time.Minute }
 
+// PreferredSize requests a double-width tile so long PR titles fit.
+func (p *Plugin) PreferredSize() plugin.Size { return plugin.Size{Width: 2, Height: 1} }
+
 func (p *Plugin) ConfigSchema() []plugin.ConfigField {
 	return []plugin.ConfigField{
 		{

@@ -142,6 +142,22 @@ type Result struct {
 `Data` must be JSON-serializable and match the shape expected by the chosen
 `Visualization`.
 
+### Optional: request a larger tile (`plugin.Sizer`)
+
+By default a widget occupies a 1×1 tile. If your widget needs more room — a wide
+one for long titles, or a tall one for long lists — implement the optional
+`Sizer` interface:
+
+```go
+// Width/Height are in grid cells, clamped to [1, 2].
+func (p *Plugin) PreferredSize() plugin.Size { return plugin.Size{Width: 2, Height: 1} }
+```
+
+The size is advisory: the dashboard honors it unless the user turns on
+**Settings → "Uniform widget sizes"**. It is surfaced over the API as `width` /
+`height` on `/api/plugins`. (External plugins set `width`/`height` in their
+`describe` output instead — see §7.)
+
 ## 2. Visualization types and their data shapes
 
 There are five visualizations (`internal/plugin/plugin.go`). Each expects a
@@ -454,12 +470,17 @@ The executable must handle two subcommands, exchanging JSON over stdio:
   "name": "File Value Watcher",
   "description": "…",
   "refresh_interval_seconds": 3600,
+  "width": 1,
+  "height": 1,
   "schema": [
     {"key": "repo", "label": "Repository", "type": "string", "required": true,
      "placeholder": "owner/repo", "help": "…"}
   ]
 }
 ```
+
+`width`/`height` are optional (grid cells, 1 or 2; default 1×1) — the
+equivalent of a built-in plugin's `plugin.Sizer`.
 
 `<plugin> run` → reads the tracker **config JSON object on stdin**, prints a
 **Result JSON** to stdout, exit 0:

@@ -81,6 +81,7 @@ UI. They are read at startup and applied to logging and GitHub authentication.
 | Dashboard order         | `dashboard_order`       | `[]`    | Preferred display order of trackers by ID. Trackers not listed are shown after the ordered ones in creation order. |
 | Debug                   | `debug`                 | `false` | Enables verbose logging (see [Debug logging](#debug-logging)).       |
 | GitHub token            | `github_token`          | `""`    | Token applied to all GitHub plugins (see below).                     |
+| Uniform widget sizes    | `uniform_sizes`         | `false` | Force every widget onto a 1×1 tile, ignoring each plugin's preferred size. |
 
 ### Auto-refresh model
 

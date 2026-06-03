@@ -30,6 +30,9 @@ type Settings struct {
 	// GitHubToken, when set, is exported as GITHUB_TOKEN so every GitHub plugin
 	// authenticates (much higher API rate limits) without per-tracker config.
 	GitHubToken string `json:"github_token"`
+	// UniformSizes forces every widget onto the default 1x1 tile, ignoring each
+	// plugin's preferred size. Off by default (the dashboard honors sizes).
+	UniformSizes bool `json:"uniform_sizes"`
 }
 
 // DefaultSettings returns the settings used before a user has saved any.

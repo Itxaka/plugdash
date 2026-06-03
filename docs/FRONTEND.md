@@ -267,11 +267,24 @@ switches over it:
 | `"timeseries"` | `renderTimeseries` — inline SVG sparkline (area + line), total + axis labels |
 | _anything else_ | `renderRaw` — pretty-printed JSON in a `<pre>` |
 
-### Uniform-height tiles
+### Tiles and widget sizes
 
-Cards are a fixed `height: 300px` with `overflow: hidden`; tall content scrolls
-inside the `.card-body` rather than letting one card tower over its neighbors,
-keeping a multi-row grid tidy.
+The grid uses `grid-auto-rows: 300px`; each card fills its area (`height: 100%`)
+with `overflow: hidden`, so tall content scrolls inside the `.card-body` rather
+than letting one card tower over its neighbors.
+
+A widget can request a larger footprint. `/api/plugins` reports each plugin's
+`width` and `height` (1 or 2 cells; from the Go `plugin.Sizer` interface, or an
+external plugin's `describe` `width`/`height`). On the dashboard,
+`applyCardSize(root, size, uniform)` maps that to `grid-column: span 2` (wide) /
+`grid-row: span 2` (tall). For example `github-prs` and `github-review-requested`
+are 2×1 (long titles), `github-actions-status` is 1×2 (many repos):
+
+![Widgets at different sizes](images/sizes.png)
+
+The **Settings → "Uniform widget sizes"** toggle (`settings.uniform_sizes`) forces
+everything back to 1×1 when a user prefers a regular grid; `applyCardSize` is then
+a no-op.
 
 `fillCard(card, tracker, res, intervalSec, at)` fills a card from a snapshot
 (whether pushed over SSE or fetched via `API.run()`): it clears `is-loading`,

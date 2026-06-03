@@ -99,6 +99,9 @@ type listItem struct {
 	Subtitle string  `json:"subtitle"`
 	URL      string  `json:"url,omitempty"`
 	Badges   []badge `json:"badges,omitempty"`
+	// Collapsed hides this row behind the list's "show more" expander — used for
+	// up-to-date deps, which are the majority and rarely need attention.
+	Collapsed bool `json:"collapsed,omitempty"`
 }
 
 // dep is one dependency to check: its name and the version currently pinned.
@@ -167,14 +170,24 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 		deps = deps[:count]
 	}
 
-	items := make([]listItem, 0, len(deps))
+	type scored struct {
+		item listItem
+		rank int
+	}
+	scoredItems := make([]scored, 0, len(deps))
 	outdated := 0
 	for _, d := range deps {
-		it, behind := evalDep(ctx, latest, d)
-		items = append(items, it)
-		if behind {
+		it, rank := evalDep(ctx, latest, d)
+		scoredItems = append(scoredItems, scored{item: it, rank: rank})
+		if rank <= rankOutdated {
 			outdated++
 		}
+	}
+	// Worst first: major behind, then outdated, then lookup-failed, then up to date.
+	sort.SliceStable(scoredItems, func(i, j int) bool { return scoredItems[i].rank < scoredItems[j].rank })
+	items := make([]listItem, 0, len(scoredItems))
+	for _, s := range scoredItems {
+		items = append(items, s.item)
 	}
 
 	return plugin.Result{
@@ -184,38 +197,49 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 	}, nil
 }
 
+// Row ranks, worst first. Rows with rank <= rankOutdated count as "outdated";
+// up-to-date rows are collapsed behind the list's expander.
+const (
+	rankMajor    = iota // 0: major version behind
+	rankOutdated        // 1: minor/patch behind
+	rankUnknown         // 2: latest could not be resolved
+	rankCurrent         // 3: up to date
+)
+
 // evalDep looks up a dependency's latest version and renders its row, returning
-// whether it is behind.
-func evalDep(ctx context.Context, latest func(context.Context, string) (string, error), d dep) (listItem, bool) {
+// the row plus its rank (used to sort worst-first and to collapse up-to-date rows).
+func evalDep(ctx context.Context, latest func(context.Context, string) (string, error), d dep) (listItem, int) {
 	want, err := latest(ctx, d.name)
 	if err != nil {
 		return listItem{
 			Title:    d.name,
 			Subtitle: "current " + d.current + " · latest unknown",
 			Badges:   []badge{{Label: "lookup failed", Tone: "neutral"}},
-		}, false
+		}, rankUnknown
 	}
 	cur := normVersion(d.current)
 	lat := normVersion(want)
+	sub := "current " + cur + " · latest " + lat
 	switch versionStatus(cur, lat) {
 	case statusCurrent:
 		return listItem{
-			Title:    d.name,
-			Subtitle: "current " + cur + " · latest " + lat,
-			Badges:   []badge{{Label: "up to date", Tone: "ok"}},
-		}, false
+			Title:     d.name,
+			Subtitle:  sub,
+			Badges:    []badge{{Label: "up to date", Tone: "ok"}},
+			Collapsed: true,
+		}, rankCurrent
 	case statusMajor:
 		return listItem{
 			Title:    d.name,
-			Subtitle: "current " + cur + " · latest " + lat,
+			Subtitle: sub,
 			Badges:   []badge{{Label: "major behind", Tone: "bad"}},
-		}, true
+		}, rankMajor
 	default:
 		return listItem{
 			Title:    d.name,
-			Subtitle: "current " + cur + " · latest " + lat,
+			Subtitle: sub,
 			Badges:   []badge{{Label: "outdated", Tone: "warn"}},
-		}, true
+		}, rankOutdated
 	}
 }
 

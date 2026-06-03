@@ -57,7 +57,8 @@ timestamp, and badge pill. Used by `github-releases`, `github-issues`,
       "icon":      "string",   // optional; image URL shown as a small avatar (e.g. repo owner)
       "badges": [              // optional; multiple tone-colored pills (e.g. answered + CI)
         { "label": "string", "tone": "ok|warn|bad|neutral" }
-      ]
+      ],
+      "collapsed": false       // optional; if true, hidden behind a "N more" expander
     }
   ]
 }
@@ -83,6 +84,10 @@ Field-by-field:
   colored by `tone` (`ok` green, `warn` amber, `bad` red, `neutral` default).
   Used by `github-issue-watch` for the answered and CI badges. Coexists with the
   single `badge` field.
+- `collapsed` — optional. Rows flagged `true` are hidden behind a `▸ N more`
+  toggle at the bottom of the list, keeping a long tail of low-interest rows out
+  of the way (e.g. `dependency-freshness` collapses up-to-date deps). Put the
+  rows that matter first and flag the rest.
 
 ### Example
 

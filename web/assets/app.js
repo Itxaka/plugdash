@@ -253,8 +253,8 @@ function renderList(data) {
   if (!items.length) {
     return el("div", { class: "skeleton", text: "No items." });
   }
-  const wrap = el("div", { class: "viz-list" });
-  for (const it of items) {
+  // Build one .list-item row from an item object.
+  function buildRow(it) {
     const item = it || {};
     const titleText = item.title != null ? String(item.title) : "(untitled)";
     const title = item.url
@@ -300,8 +300,32 @@ function renderList(data) {
       : null;
 
     const avatar = item.icon ? el("img", { class: "avatar", src: item.icon, loading: "lazy", alt: "" }) : null;
+    return el("div", { class: "list-item" }, [avatar, mainCol, meta]);
+  }
 
-    wrap.appendChild(el("div", { class: "list-item" }, [avatar, mainCol, meta]));
+  const wrap = el("div", { class: "viz-list" });
+  // Items flagged {collapsed:true} are tucked behind a "show more" expander, so
+  // a long tail of uninteresting rows (e.g. up-to-date deps) stays out of the way.
+  const collapsed = items.filter((it) => it && it.collapsed);
+  for (const it of items) {
+    if (it && it.collapsed) continue;
+    wrap.appendChild(buildRow(it));
+  }
+  if (collapsed.length) {
+    const hidden = el("div", { class: "list-collapsed" });
+    for (const it of collapsed) hidden.appendChild(buildRow(it));
+    const label = collapsed.length + " more";
+    const toggle = el("button", {
+      class: "jobs-toggle",
+      type: "button",
+      text: "▸ " + label,
+    });
+    toggle.addEventListener("click", () => {
+      const open = hidden.classList.toggle("open");
+      toggle.textContent = (open ? "▾ " : "▸ ") + label;
+    });
+    wrap.appendChild(toggle);
+    wrap.appendChild(hidden);
   }
   return wrap;
 }
@@ -690,6 +714,18 @@ async function renderDashboard() {
       return;
     }
 
+    // Plugin sizes drive each card's grid footprint (unless uniform sizing is on).
+    const sizeById = {};
+    try {
+      if (!pluginsCache) pluginsCache = await API.plugins();
+      for (const p of pluginsCache || []) {
+        sizeById[p.id] = { w: p.width || 1, h: p.height || 1 };
+      }
+    } catch (e) {
+      /* sizing is optional */
+    }
+    const uniform = !!(settingsCache && settingsCache.uniform_sizes);
+
     const grid = el("div", { class: "grid" });
     body.appendChild(grid);
 
@@ -697,6 +733,7 @@ async function renderDashboard() {
     byId.clear();
     for (const t of ordered) {
       const card = buildCardShell(t);
+      applyCardSize(card.root, sizeById[t.plugin_id], uniform);
       wireCardDrag(card.root, grid);
       grid.appendChild(card.root);
       byId.set(t.id, { tracker: t, card });
@@ -864,6 +901,24 @@ function buildCardShell(tracker) {
   root.style.setProperty("--type", ic.c); // per-type accent color for the card
   root.dataset.trackerId = tracker.id;
   return { root, titleEl, subtitleEl, bodyEl, cadenceEl, updatedEl, refreshBtn, editBtn, deleteBtn };
+}
+
+// applyCardSize sets a card's grid footprint from its plugin's preferred size
+// (width/height in cells, 1 or 2). With uniform sizing on, or no size info, the
+// card stays the default 1x1 tile.
+function applyCardSize(root, size, uniform) {
+  root.style.gridColumn = "";
+  root.style.gridRow = "";
+  root.classList.remove("card-wide", "card-tall");
+  if (uniform || !size) return;
+  if (size.w === 2) {
+    root.style.gridColumn = "span 2";
+    root.classList.add("card-wide");
+  }
+  if (size.h === 2) {
+    root.style.gridRow = "span 2";
+    root.classList.add("card-tall");
+  }
 }
 
 // fmtInterval renders a seconds count as a compact cadence like "30s","2m","1h","1d".
@@ -1742,6 +1797,21 @@ async function renderSettings() {
     ])
   );
 
+  const uniform = el("input", { type: "checkbox", id: "set-uniform" });
+  uniform.checked = !!settings.uniform_sizes;
+  panel.appendChild(
+    el("div", { class: "field" }, [
+      el("div", { class: "field-check" }, [
+        uniform,
+        el("label", { for: "set-uniform", text: "Uniform widget sizes" }),
+      ]),
+      el("div", {
+        class: "help",
+        text: "Force every widget onto the same 1×1 tile. Off by default — widgets that ask for more space (wide PR lists, tall CI overviews) get it.",
+      }),
+    ])
+  );
+
   const ghToken = el("input", {
     type: "password",
     id: "set-ghtoken",
@@ -1776,11 +1846,13 @@ async function renderSettings() {
         autorefresh_enabled: enabled.checked,
         debug: debug.checked,
         github_token: ghToken.value.trim(),
+        uniform_sizes: uniform.checked,
         dashboard_order: settingsCache && settingsCache.dashboard_order,
       });
       settingsCache = saved;
       enabled.checked = !!saved.autorefresh_enabled;
       debug.checked = !!saved.debug;
+      uniform.checked = !!saved.uniform_sizes;
       ghToken.value = saved.github_token || "";
       msg.className = "form-msg ok";
       msg.textContent = "Settings saved.";

@@ -719,6 +719,14 @@ body {
   display: flex;
 }
 
+/* Collapsed list tail (e.g. up-to-date deps), revealed by the row's toggle. */
+.list-collapsed {
+  display: none;
+}
+.list-collapsed.open {
+  display: block;
+}
+
 .job-pill {
   display: inline-flex;
   align-items: center;
@@ -815,8 +823,10 @@ body {
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  /* Fixed row height so a widget can request `grid-row: span 2` for a tall tile;
+     cards stretch to fill their (1- or 2-row) area. */
+  grid-auto-rows: 300px;
   gap: 16px;
-  align-items: start;
 }
 
 .card {
@@ -828,9 +838,9 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  /* Uniform tile height keeps a multi-row grid tidy; tall content scrolls
-     inside the body rather than making one card tower over its neighbours. */
-  height: 300px;
+  /* Fill the grid area (1 or 2 rows tall); tall content scrolls inside the body
+     rather than making one card tower over its neighbours. */
+  height: 100%;
   overflow: hidden;
   transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }

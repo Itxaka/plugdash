@@ -61,6 +61,9 @@ func (p *Plugin) ConfigSchema() []plugin.ConfigField {
 // RefreshInterval reports how long the dashboard should wait between re-runs.
 func (p *Plugin) RefreshInterval() time.Duration { return 2 * time.Minute }
 
+// PreferredSize requests a double-height tile: a CI overview often spans many repos.
+func (p *Plugin) PreferredSize() plugin.Size { return plugin.Size{Width: 1, Height: 2} }
+
 // checkItem mirrors a single entry in the checklist Data shape.
 type checkItem struct {
 	Label  string      `json:"label"`

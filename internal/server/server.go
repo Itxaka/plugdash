@@ -141,6 +141,8 @@ type pluginDTO struct {
 	Description            string               `json:"description"`
 	RefreshIntervalSeconds int                  `json:"refresh_interval_seconds"`
 	External               bool                 `json:"external"`
+	Width                  int                  `json:"width"`
+	Height                 int                  `json:"height"`
 	Schema                 []plugin.ConfigField `json:"schema"`
 }
 
@@ -152,12 +154,15 @@ func (s *Server) handleListPlugins(w http.ResponseWriter, r *http.Request) {
 		if em, ok := p.(externalMarker); ok {
 			external = em.IsExternal()
 		}
+		size := plugin.SizeOf(p)
 		out = append(out, pluginDTO{
 			ID:                     p.ID(),
 			Name:                   p.Name(),
 			Description:            p.Description(),
 			RefreshIntervalSeconds: int(p.RefreshInterval().Seconds()),
 			External:               external,
+			Width:                  size.Width,
+			Height:                 size.Height,
 			Schema:                 p.ConfigSchema(),
 		})
 	}

@@ -32,7 +32,7 @@ func logPluginStderr(log *slog.Logger, stderr string) {
 	if stderr == "" {
 		return
 	}
-	for _, line := range strings.Split(stderr, "\n") {
+	for line := range strings.SplitSeq(stderr, "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			log.Debug("plugin stderr", "line", line)
 		}
@@ -59,6 +59,8 @@ type describeOutput struct {
 	Name                   string               `json:"name"`
 	Description            string               `json:"description"`
 	RefreshIntervalSeconds int                  `json:"refresh_interval_seconds"`
+	Width                  int                  `json:"width"`
+	Height                 int                  `json:"height"`
 	Schema                 []plugin.ConfigField `json:"schema"`
 }
 
@@ -91,6 +93,13 @@ func (e *ExternalPlugin) RefreshInterval() time.Duration {
 		return time.Hour
 	}
 	return time.Duration(e.meta.RefreshIntervalSeconds) * time.Second
+}
+
+// PreferredSize lets an external plugin request a larger footprint via the
+// "width"/"height" fields of its describe output. Unset/0 values fall back to
+// the 1x1 default once clamped by plugin.SizeOf.
+func (e *ExternalPlugin) PreferredSize() plugin.Size {
+	return plugin.Size{Width: e.meta.Width, Height: e.meta.Height}
 }
 
 // Run executes `<plugin> run`, feeding the tracker config as JSON on stdin and

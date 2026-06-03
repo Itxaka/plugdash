@@ -561,8 +561,10 @@ module proxy / npm registry. Public repos need no authentication.
 | `include_dev` | Include devDependencies | bool | no | true | npm only |
 
 Each dep row shows `current X · latest Y` with a badge: `up to date` (green),
-`outdated` (amber, same major), or `major behind` (red). go.mod `// indirect`
-requires are skipped. The title summarizes how many are outdated.
+`outdated` (amber, same major), or `major behind` (red). Rows are ordered
+worst-first, and up-to-date deps are collapsed behind a "show more" expander so
+only what needs attention is visible. go.mod `// indirect` requires are skipped;
+the title summarizes how many are outdated.
 
 ---
 

@@ -159,6 +159,41 @@ func trimSpace(s string) string {
 	return s[start:end]
 }
 
+// Size is a widget's preferred dashboard footprint, in grid cells. Each axis is
+// 1 or 2 (clamped by SizeOf); 1x1 is the default tile.
+type Size struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+// Sizer is an optional interface a plugin may implement to request a larger
+// footprint than the default 1x1 — e.g. a wide widget for long titles, or a
+// tall one for long lists. The dashboard honors it unless the user has enabled
+// uniform sizing.
+type Sizer interface {
+	PreferredSize() Size
+}
+
+// SizeOf returns p's preferred size, defaulting to 1x1 and clamping each axis to
+// the supported [1, 2] range.
+func SizeOf(p Plugin) Size {
+	s := Size{Width: 1, Height: 1}
+	if sz, ok := p.(Sizer); ok {
+		s = sz.PreferredSize()
+	}
+	return Size{Width: clampAxis(s.Width), Height: clampAxis(s.Height)}
+}
+
+func clampAxis(n int) int {
+	if n < 1 {
+		return 1
+	}
+	if n > 2 {
+		return 2
+	}
+	return n
+}
+
 // Plugin is implemented by every data source. Implementations must be safe for
 // concurrent use: Run may be invoked for multiple trackers at once.
 type Plugin interface {
