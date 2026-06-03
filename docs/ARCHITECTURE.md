@@ -197,8 +197,12 @@ cost of a busy dashboard is decoupled from the number of viewers.
 An optional `--config <file.yaml>` declaratively defines trackers, reconciled into the SQLite store at
 startup by **`internal/config`** alongside ad-hoc trackers created in the UI — a **hybrid model**.
 
-- Trackers from the file are stored with **`source="file"`** and are **read-only in the UI** (the API
-  rejects edits/deletes of them). Trackers created through the UI are **`source="db"`**.
+- Trackers from the file are stored with **`source="file"`** and are **not editable in the UI** (the
+  API rejects `PUT` on them, since a reload would overwrite the edit). They **can** be deleted — the
+  on-disk file is never modified, so a reload or restart restores them. Trackers created through the
+  UI are **`source="db"`**. Runtime endpoints — `POST /api/trackers/clear|reload|import` and
+  `GET /api/trackers/export` — clear the running set, re-reconcile from `--config`, import a config
+  (session-only), or dump the current trackers.
 - Reconciliation matches file entries by a stable **`config_key`**, so a file-defined tracker keeps
   its row id (and therefore its dashboard order) across restarts even as its config changes.
 - Entries removed from the file are **deleted on the next start**; **`source="db"` trackers are never
@@ -335,8 +339,9 @@ startup by **`internal/config`** alongside ad-hoc trackers created in the UI —
 - `web/assets/app.js` is a vanilla-JS SPA: it subscribes to `/api/stream` with an `EventSource`
   (falling back to polling `/api/run` every 8s if SSE fails/closes), calls the other `/api/...`
   endpoints, renders the dashboard / configure / settings / logs screens, and maps each snapshot's
-  `Result.visualization` to a renderer in `renderViz`. File-defined trackers render without
-  edit/delete controls.
+  `Result.visualization` to a renderer in `renderViz`. File-defined trackers render without an
+  edit control (delete is allowed; a reload restores them). The Trackers view also has a
+  bulk-action bar (clear / reload-from-file / import / export).
 
 ## Plugin lifecycle
 
@@ -348,8 +353,8 @@ startup by **`internal/config`** alongside ad-hoc trackers created in the UI —
 2. **Configuration → tracker.** A user picks a plugin in the UI (its `ConfigSchema` drives the form),
    fills it in, and the config is persisted as a `source="db"` `Tracker` row via `POST /api/trackers`.
    Alternatively, trackers are declared in the `--config` YAML and reconciled in as `source="file"`
-   (read-only). Either way the plugin id is fixed for the life of the tracker. Each create/update/
-   delete (and the config reconcile) calls `engine.Reconcile()`.
+   (not UI-editable, but deletable; reload restores them). Either way the plugin id is fixed for the
+   life of the tracker. Each create/update/delete (and the config reconcile) calls `engine.Reconcile()`.
 3. **Run on the server, on a cadence.** The **engine** runs each tracker on its **effective interval**
    while at least one client is present, caches the latest result as a **`Snapshot`**, and pushes it
    over SSE; when nobody is watching it idles and makes no upstream calls. Each run gets a fresh **30s

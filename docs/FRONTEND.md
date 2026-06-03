@@ -348,8 +348,9 @@ Cards are reorderable by dragging the handle:
 
 ## Configure / Trackers view
 
-`renderConfigure` shows a two-panel layout (`.config-layout`): a **list** of
-existing trackers and a **form** panel. Plugins and trackers are loaded together
+`renderConfigure` shows a **bulk-action bar** (`buildTrackerActions`) above a
+two-panel layout (`.config-layout`): a **list** of existing trackers and a
+**form** panel. Plugins and trackers are loaded together
 (`Promise.all([API.plugins(), API.trackers()])`); plugins are cached in
 `pluginsCache`.
 
@@ -357,11 +358,31 @@ The list (`refreshList`) renders one `.tracker-row` per tracker (icon + name +
 plugin name) with **Edit** and **Delete** buttons. Edit opens the tracker in the
 form; Delete calls `API.deleteTracker` then refreshes the list (`afterChange`).
 
-**File-managed trackers are read-only here too.** When `tracker.source ===
-"file"`, the row **omits** both the Edit and Delete buttons and shows a `config`
-badge ("Managed by config file (read-only)") next to the name — matching the
-dashboard card treatment. Only db-backed trackers get the action buttons and the
-schema-driven edit form.
+**File-managed trackers can be deleted but not edited.** When `tracker.source ===
+"file"`, the row (and the dashboard card) **omits the Edit button** and shows a
+`config` badge, but **keeps the Delete button** — deleting a file tracker is
+allowed because **Reload from file** restores it. Editing stays blocked since a
+reload would overwrite the change.
+
+### Bulk actions — `buildTrackerActions(onChanged)`
+
+The action bar (`.tracker-actions-bar`) operates on the running tracker set and
+calls `onChanged()` (→ `afterChange`) to refresh the list after any mutation:
+
+- **Reload from file** → `API.reloadTrackers()` (`POST /api/trackers/reload`).
+  Enabled only when `API.getConfig()` (`GET /api/config`) reports `configured`;
+  otherwise the button is disabled with an explanatory title.
+- **Load from file…** → a hidden `<input type="file">`; the chosen file's text is
+  POSTed via `API.importTrackers()` (`POST /api/trackers/import`).
+- **Paste config…** → toggles a `<textarea>` (`.import-paste`) + a "Load pasted
+  config" button that imports the pasted YAML. A note warns that loaded trackers
+  are session-only.
+- **Dump to config** → an `<a href="/api/trackers/export" download>` that
+  downloads `plugdash-trackers.yaml` (trackers only, no secrets).
+- **Clear all** → `confirm()` then `API.clearTrackers()` (`POST
+  /api/trackers/clear`).
+
+Results and errors render into a shared `.form-msg` line in the bar.
 
 ### Schema-driven form — `buildForm` / `renderSchemaForm`
 

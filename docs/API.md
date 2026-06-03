@@ -21,8 +21,9 @@ If the engine is not enabled, the server falls back to the per-request behavior 
 inline for each endpoint, and `GET /api/stream` returns `501 Not Implemented`.
 
 **Config-as-code.** Trackers can either be user-created in the UI (editable) or declared in
-a config file and reconciled into the database on load (read-only). Each tracker object
-reports this via its `source` field; see the tracker schema below.
+a config file and reconciled into the database on load (not UI-editable, but deletable — a
+reload restores them). Each tracker object reports this via its `source` field; see the
+tracker schema below. Runtime endpoints clear, reload-from-file, import, and export trackers.
 
 ## Conventions
 
@@ -47,10 +48,15 @@ reports this via its `source` field; see the tracker schema below.
 | GET | `/api/trackers` | List all configured trackers |
 | POST | `/api/trackers` | Create a tracker |
 | PUT | `/api/trackers/{id}` | Update a tracker's name, config, and refresh interval |
-| DELETE | `/api/trackers/{id}` | Delete a tracker |
+| DELETE | `/api/trackers/{id}` | Delete a tracker (file-managed ones included) |
+| POST | `/api/trackers/clear` | Delete every tracker (db- and file-sourced) |
+| POST | `/api/trackers/reload` | Re-reconcile trackers from the server's `--config` file |
+| POST | `/api/trackers/import` | Load trackers from a config document in the request body (session-only) |
+| GET | `/api/trackers/export` | Download the current trackers as a config YAML (trackers only) |
 | GET | `/api/trackers/{id}/run` | Get a single tracker's cached snapshot (`?force=true` to re-run) |
 | GET | `/api/run` | Get all trackers' cached snapshots as an array |
 | GET | `/api/stream` | Server-Sent Events stream of tracker snapshots |
+| GET | `/api/config` | Report whether a declarative config file is configured |
 | GET | `/api/settings` | Get dashboard-wide settings |
 | PUT | `/api/settings` | Save dashboard-wide settings |
 | GET | `/api/logs` | Get captured log entries and debug state |
@@ -199,7 +205,7 @@ A tracker object has the following shape:
 | `config` | object | Arbitrary JSON object of config keys matching the plugin's schema. |
 | `refresh_interval_seconds` | number | Per-tracker override of the plugin's default cadence. `0` means "use the plugin default". |
 | `created_at` | string | RFC3339 creation timestamp. |
-| `source` | string | Where the tracker came from: `"db"` for a user-created tracker (editable and deletable via the API/UI) or `"file"` for a config-managed tracker (declared in the config file, reconciled on load, and read-only — see `PUT`/`DELETE` below). |
+| `source` | string | Where the tracker came from: `"db"` for a user-created tracker (editable and deletable via the API/UI) or `"file"` for a config-managed tracker (declared in the config file, reconciled on load — not editable via `PUT`, but deletable; a reload restores it. See `PUT`/`DELETE` below). |
 | `config_key` | string | Stable identity of a file-managed tracker within the config file, used to reconcile it in place across reloads. Present only when `source` is `"file"`; omitted for `"db"` trackers. |
 
 ### GET /api/trackers
@@ -292,8 +298,10 @@ empty/omitted, the existing name is preserved.
 
 ### DELETE /api/trackers/{id}
 
-Deletes a tracker. Config-managed trackers (`source: "file"`) cannot be deleted via the API
-and return `403 Forbidden`; only `source: "db"` trackers can be deleted.
+Deletes a tracker. Both user (`source: "db"`) and config-managed (`source: "file"`) trackers
+can be deleted — the on-disk config file is untouched, so `POST /api/trackers/reload` (or a
+restart) restores any file-managed tracker removed here. **Editing** a file-managed tracker is
+still blocked (see `PUT /api/trackers/{id}`), since a reload would overwrite the change.
 
 **Path parameters:** `id` — integer tracker ID.
 
@@ -306,9 +314,81 @@ and return `403 Forbidden`; only `source: "db"` trackers can be deleted.
 | Status | When | Body |
 | ------ | ---- | ---- |
 | `400 Bad Request` | `id` is not an integer. | `{"error": "invalid id"}` |
-| `403 Forbidden` | The tracker's `source` is `"file"` (config-managed, cannot be deleted from the UI). | `{"error": "tracker is managed by config and cannot be deleted from the UI"}` |
 | `404 Not Found` | No tracker with that `id`. | `{"error": "tracker not found"}` |
 | `500 Internal Server Error` | Database delete failed. | `{"error": "<message>"}` |
+
+---
+
+### POST /api/trackers/clear
+
+Deletes **every** tracker — both `source: "db"` and `source: "file"`. The on-disk config file
+(if any) is left untouched, so file-managed trackers can be restored with
+`POST /api/trackers/reload` or a restart. Snapshots are cascade-deleted.
+
+**Request:** No body.
+
+**Response `200 OK`:** `{"cleared": <count>}` — the number of trackers removed.
+
+| Status | When | Body |
+| ------ | ---- | ---- |
+| `500 Internal Server Error` | Database delete failed. | `{"error": "<message>"}` |
+
+---
+
+### POST /api/trackers/reload
+
+Re-reads the declarative config file the server was started with (`--config`) from disk and
+reconciles its trackers into the store. Idempotent and dedup-by-key: removing a file tracker
+then reloading restores it with no duplicates. User (`source: "db"`) trackers are untouched.
+
+**Request:** No body.
+
+**Response `200 OK`:** `{"trackers": <count>}` — the number of trackers in the config file.
+
+| Status | When | Body |
+| ------ | ---- | ---- |
+| `409 Conflict` | The server was not started with `--config`. | `{"error": "no config file configured (start plugdash with --config to enable reload)"}` |
+| `500 Internal Server Error` | The config could not be read/parsed, or the reconcile failed. | `{"error": "<message>"}` |
+
+---
+
+### POST /api/trackers/import
+
+Loads trackers from a config document supplied in the request body (a `--config`-style YAML,
+typically uploaded or pasted in the UI). The trackers are reconciled as `source: "file"`, so
+they are **session-only**: a restart's startup reconcile (against the original `--config`, or
+nothing) reverts them. Like reload, this replaces the whole file-tracker set and dedups by key.
+
+**Request body:** A plugdash config document (YAML). Max 1 MiB. Same schema as `--config`
+(see `docs/CONFIGURATION.md`).
+
+**Response `200 OK`:** `{"loaded": <count>}` — the number of trackers loaded.
+
+| Status | When | Body |
+| ------ | ---- | ---- |
+| `400 Bad Request` | The body could not be read or is not a valid config (unknown keys, missing `plugin`, duplicate keys, …). | `{"error": "<message>"}` |
+| `500 Internal Server Error` | The reconcile failed. | `{"error": "<message>"}` |
+
+---
+
+### GET /api/trackers/export
+
+Serializes the current trackers as a downloadable config YAML. The document contains **only**
+a `trackers:` list — never a `settings:` block — so secrets such as the GitHub token never
+leave in a dump. The output can be fed back via `--config` or `POST /api/trackers/import`.
+
+**Request:** No body.
+
+**Response `200 OK`:**
+
+- `Content-Type: application/x-yaml`
+- `Content-Disposition: attachment; filename="plugdash-trackers.yaml"`
+- Body: the config YAML. Each tracker's key is its `config_key` when set, else a slug of its
+  name (deduped with the tracker id on collision so the output re-parses cleanly).
+
+| Status | When | Body |
+| ------ | ---- | ---- |
+| `500 Internal Server Error` | Listing or marshaling failed. | `{"error": "<message>"}` |
 
 ---
 
@@ -514,6 +594,25 @@ A keepalive comment looks like:
 | ------ | ---- | ---- |
 | `501 Not Implemented` | The run engine is not enabled. | `{"error": "live updates not enabled"}` |
 | `500 Internal Server Error` | The underlying connection does not support streaming/flushing. | `{"error": "streaming unsupported"}` |
+
+---
+
+## Config
+
+### GET /api/config
+
+Reports whether the server was started with a declarative config file. The UI uses this to
+enable or disable the "Reload from file" action.
+
+**Request:** No body.
+
+**Response `200 OK`:**
+
+```json
+{ "configured": true, "path": "/etc/plugdash/plugdash.yaml" }
+```
+
+`configured` is `false` (and `path` empty) when no `--config` flag was given.
 
 ---
 

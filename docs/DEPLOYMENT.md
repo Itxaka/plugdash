@@ -121,9 +121,10 @@ docker run -d --name plugdash \
 ## Deploying with a config file
 
 You can manage trackers declaratively ("config-as-code") by pointing `--config`
-at a YAML file. Trackers defined there are reconciled into the database and shown
-read-only in the UI (a `config` badge, with edit/delete disabled); users can
-still add their own trackers through the UI. See
+at a YAML file. Trackers defined there are reconciled into the database and carry
+a `config` badge in the UI (not editable from the UI, but deletable — a reload
+restores them); users can still add their own trackers through the UI. The
+Trackers view can also clear, reload, import, and dump trackers at runtime. See
 [CONFIGURATION.md](CONFIGURATION.md) for the schema and `examples/plugdash.yaml`
 for a sample.
 

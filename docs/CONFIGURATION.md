@@ -123,12 +123,13 @@ plugdash --config /path/to/plugdash.yaml
 ```
 
 Trackers defined in the file are reconciled into the database on startup and
-shown **read-only** in the UI: they carry a `config` badge and their Edit/Delete
-controls are disabled. This is a **hybrid** model — users can still add their own
-ad-hoc trackers through the UI, and those are independent and fully editable.
-Removing a tracker from the file (or starting without `--config` at all) deletes
-the file-managed trackers on the next start; user-created trackers are never
-touched.
+carry a `config` badge in the UI. They cannot be **edited** from the UI (a reload
+would overwrite the change), but they **can** be deleted — the on-disk file is
+never modified, so a reload or restart restores them. This is a **hybrid** model
+— users can still add their own ad-hoc trackers through the UI, and those are
+independent and fully editable. Removing a tracker from the file (or starting
+without `--config` at all) deletes the file-managed trackers on the next start;
+user-created trackers are never touched.
 
 Trackers are matched and updated by a stable `key`, so editing a name or config
 in the file updates the existing widget in place and preserves its dashboard
@@ -187,6 +188,33 @@ Config-file `settings` apply on top of the stored DB settings at startup but are
 **not** saved back to the DB settings row. The UI stays authoritative for any
 settings the user changes there. (`github_token` still respects an explicit
 `GITHUB_TOKEN` already present in the environment — see below.)
+
+### Managing trackers at runtime
+
+The **Trackers** view has a bulk-action bar that operates on the *running*
+tracker set without ever modifying config files on disk:
+
+- **Clear all** — removes every tracker (user- and file-sourced). Since the disk
+  config is untouched, **Reload from file** or a restart restores the
+  file-managed ones; user-created trackers are gone for good.
+- **Reload from file** — re-reads the server's `--config` file and reconciles it.
+  Idempotent and dedup-by-key: remove one file tracker, reload, and the full set
+  is back with no duplicates. Disabled when the server was started without
+  `--config`.
+- **Load from file…** / **Paste config…** — imports an arbitrary config (uploaded
+  file or pasted YAML, same schema as above). The loaded trackers are
+  **session-only**: they reconcile in as file-sourced trackers, so a restart's
+  startup reconcile (against the original `--config`, or nothing) reverts them.
+  This lets you try a config without baking it into the deployment — the intended
+  model is still to bundle your config with the binary/image, but nothing stops
+  ad-hoc loading.
+- **Dump to config** — downloads the current trackers as a `--config`-style YAML.
+  The dump contains **only** a `trackers:` list — never `settings:` — so the
+  GitHub token is never written to the file. Feed it back via `--config` or
+  **Load from file…**.
+
+These map to `POST /api/trackers/clear`, `POST /api/trackers/reload`,
+`POST /api/trackers/import`, and `GET /api/trackers/export` (see `docs/API.md`).
 
 ### GitHub authentication and rate limits
 

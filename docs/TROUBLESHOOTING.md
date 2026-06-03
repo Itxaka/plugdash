@@ -335,20 +335,24 @@ instantly — so cards update at their own cadence, not all at once.
 
 ---
 
-## Can't edit or delete a tracker (Edit/Delete missing or 403)
+## Can't edit a tracker (Edit missing or 403)
 
-**Symptom.** A tracker has no Edit/Delete controls, shows a `config` badge,
-or the API returns **403** when you try to edit or delete it.
+**Symptom.** A tracker has no Edit control, shows a `config` badge, or the API
+returns **403** when you try to edit it (`PUT /api/trackers/{id}`).
 
-**Cause.** That tracker is **managed by the config file** (`source=file`).
-File-managed trackers are read-only in the UI by design — the config file is
-their source of truth, so the API rejects UI edits and deletes of them with
-a 403.
+**Cause.** That tracker is **managed by the config file** (`source=file`). The
+config file is its source of truth, so editing it from the UI is blocked — a
+reload would just overwrite the change. (Deleting it *is* allowed; see below.)
 
-**Fix.** Edit the tracker in the **YAML config file** and restart plugdash to
-apply the change. If instead you want to manage that tracker from the UI,
-**remove its entry from the config** (and restart); once it is no longer
-file-managed you can edit and delete it normally.
+**Fix.** Edit the tracker in the **YAML config file**, then **Reload from file**
+in the Trackers view (or restart) to apply the change. If instead you want to
+manage that tracker from the UI, **remove its entry from the config** (and
+reload/restart); once it is no longer file-managed you can edit it normally.
+
+**Note on deleting.** File-managed trackers *can* be deleted from the UI (and via
+`DELETE /api/trackers/{id}` / **Clear all**) — the on-disk config is never
+touched, so **Reload from file** or a restart brings them back. Deleting one then
+reloading restores the full configured set with no duplicates.
 
 ---
 

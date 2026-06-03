@@ -28,10 +28,12 @@ binary with the frontend embedded.
   `/api/run` poll within 20s). With nobody watching it idles and makes **zero**
   upstream API calls.
 - **Config-as-code.** Point `--config` at a YAML file to declare trackers
-  declaratively; they're reconciled into the DB and shown read-only in the UI
-  (a `config` badge, edit/delete disabled). Users can still add their own
-  trackers through the UI — a hybrid model. See
-  [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and
+  declaratively; they're reconciled into the DB and carry a `config` badge in the
+  UI (not editable from the UI, but deletable — a reload restores them). Users can
+  still add their own trackers through the UI — a hybrid model. The Trackers view
+  can also **clear** all trackers, **reload** from the config file, **load** an
+  uploaded/pasted config (session-only), and **dump** the current trackers to a
+  config file. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) and
   [examples/plugdash.yaml](examples/plugdash.yaml).
 
 ### A quick tour

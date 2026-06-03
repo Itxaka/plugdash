@@ -4,6 +4,40 @@ All notable changes to plugdash are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-06-03
+
+This release adds bulk tracker management to the Trackers view, building on the
+config-as-code reconcile from 0.2.0.
+
+### Added
+
+- **Clear all trackers.** `POST /api/trackers/clear` removes every tracker
+  (user- and file-sourced). The on-disk config file is left untouched, so a
+  reload or restart restores the file-managed ones.
+- **Reload from file.** `POST /api/trackers/reload` re-reads the server's
+  `--config` file and reconciles it. Idempotent and dedup-by-key: remove a file
+  tracker, reload, and the full set is back with no duplicates. Returns `409` when
+  the server was started without `--config`.
+- **Load from file / paste.** `POST /api/trackers/import` loads trackers from an
+  uploaded or pasted config document. They reconcile in as `source="file"`, so
+  they are **session-only** — a restart reverts to the bundled/`--config` set.
+- **Dump to config.** `GET /api/trackers/export` downloads the current trackers as
+  a `--config`-style YAML. The dump contains only a `trackers:` list — never a
+  `settings:` block — so the GitHub token never leaves in a dump.
+- **Config status.** `GET /api/config` reports whether a `--config` file is set,
+  so the UI can enable/disable the "Reload from file" action.
+- A **bulk-action bar** in the Trackers view wiring up the above (Reload from
+  file, Load from file…, Paste config…, Dump to config, Clear all), with a
+  session-only warning on import.
+
+### Changed
+
+- **File-managed trackers are now deletable** from the UI and API (per-widget and
+  via Clear); a reload restores them. Editing them stays blocked (`403` on `PUT`),
+  since a reload would overwrite the change. Previously both edit and delete were
+  blocked with `403`.
+- Modernized a min-clamp in `ReconcileFileTrackers` to use the builtin `max`.
+
 ## [0.2.0] - 2026-06-03
 
 This release moves tracker execution off the browser and onto the server, adds
@@ -66,4 +100,5 @@ declarative configuration, and makes the result cache survive restarts.
   client, no server calls) instead of freezing on "just now" until a full page
   reload; the exact fetch time is available on hover.
 
+[0.3.0]: https://github.com/Itxaka/plugdash/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Itxaka/plugdash/compare/v0.1.6...v0.2.0
