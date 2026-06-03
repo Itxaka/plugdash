@@ -179,23 +179,37 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 	}
 	scoredItems := make([]scored, 0, len(deps))
 	outdated := 0
+	green := 0
 	for _, d := range deps {
 		it, rank := evalDep(ctx, latest, d)
 		scoredItems = append(scoredItems, scored{item: it, rank: rank})
 		if rank <= rankOutdated {
 			outdated++
 		}
+		if rank == rankCurrent {
+			green++
+		}
 	}
 	// Worst first: major behind, then outdated, then lookup-failed, then up to date.
 	sort.SliceStable(scoredItems, func(i, j int) bool { return scoredItems[i].rank < scoredItems[j].rank })
-	items := make([]listItem, 0, len(scoredItems))
+	total := len(scoredItems)
+	items := make([]listItem, 0, total+1)
+	// When every dependency is up to date the list would be all-collapsed (an
+	// empty-looking card). Lead with a cheerful summary row instead.
+	if total > 0 && green == total {
+		items = append(items, listItem{
+			Title:    "All dependencies up to date 🎉",
+			Subtitle: fmt.Sprintf("%d checked, all current", total),
+			Badges:   []badge{{Label: "all current", Tone: "ok"}},
+		})
+	}
 	for _, s := range scoredItems {
 		items = append(items, s.item)
 	}
 
 	return plugin.Result{
 		Visualization: plugin.VizList,
-		Title:         fmt.Sprintf("%s/%s · %s — %d of %d outdated", owner, name, eco, outdated, len(items)),
+		Title:         fmt.Sprintf("%s/%s · %s — %d of %d outdated", owner, name, eco, outdated, total),
 		Data:          map[string]any{"items": items},
 	}, nil
 }

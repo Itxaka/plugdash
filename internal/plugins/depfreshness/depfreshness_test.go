@@ -153,6 +153,43 @@ func TestRunPackageJSON(t *testing.T) {
 	}
 }
 
+func TestRunAllGreen(t *testing.T) {
+	// A go.mod whose every (direct) dep matches the latest version.
+	const allGreenMod = "module x\n\ngo 1.22\n\nrequire github.com/foo/bar v1.2.3\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/main/go.mod"):
+			_, _ = w.Write([]byte(allGreenMod))
+		case strings.HasSuffix(r.URL.Path, "/@latest"):
+			_, _ = w.Write([]byte(`{"Version":"v1.2.3"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	pr, pp := rawBaseURL, goProxyBaseURL
+	rawBaseURL, goProxyBaseURL = srv.URL, srv.URL
+	t.Cleanup(func() { rawBaseURL, goProxyBaseURL = pr, pp; srv.Close() })
+
+	res, err := New().Run(context.Background(), plugin.Config{"repo": "o/r", "file": "go.mod"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !strings.Contains(res.Title, "0 of 1 outdated") {
+		t.Errorf("title = %q, want '0 of 1 outdated'", res.Title)
+	}
+	items := decodeItems(t, res)
+	// A leading non-collapsed celebratory row + the collapsed dep.
+	if len(items) != 2 {
+		t.Fatalf("got %d items, want 2 (summary + dep): %+v", len(items), items)
+	}
+	if items[0].Collapsed || badgeOf(items[0]) != "all current" {
+		t.Errorf("first row should be the visible summary, got %+v", items[0])
+	}
+	if !items[1].Collapsed {
+		t.Errorf("the up-to-date dep should be collapsed, got %+v", items[1])
+	}
+}
+
 func TestRunUnsupportedFile(t *testing.T) {
 	oneServer(t)
 	if _, err := New().Run(context.Background(), plugin.Config{"repo": "o/r", "file": "requirements.txt"}); err == nil {
