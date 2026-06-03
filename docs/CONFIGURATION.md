@@ -168,9 +168,11 @@ trackers:
 Built-in plugin IDs available for `plugin`: `github-releases`,
 `github-release-artifacts`, `github-repo-stats`, `github-actions-status`,
 `github-activity`, `github-activity-rate`, `github-issues`,
-`github-issue-watch`, `github-prs`, `endoflife`, `osv-vulns`,
-`http-health`, `rss-feed`, `docker-image`, `file-version`. External plugins are
-also usable by their registered ID.
+`github-issue-watch`, `github-prs`, `github-review-requested`, `github-stale`,
+`github-milestone`, `github-workflow-health`, `github-dependabot`,
+`dependency-freshness`, `endoflife`, `osv-vulns`, `http-health`, `rss-feed`,
+`docker-image`, `file-version`. External plugins are also usable by their
+registered ID.
 
 ### Validation rules
 

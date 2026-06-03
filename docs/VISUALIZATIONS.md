@@ -340,6 +340,33 @@ first and last x labels. When dates parse, axis labels are formatted as
 
 ---
 
+## `gauge`
+
+A progress bar with a big percentage, for completion / utilization widgets
+(e.g. `github-milestone`).
+
+### Data shape
+
+```jsonc
+{
+  "label":  "string",   // optional; shown next to the percentage
+  "value":  0,          // current amount
+  "max":    0,          // total; percentage = value / max (clamped 0–100)
+  "unit":   "string",   // optional; appended to the "value / max" footer
+  "status": "ok",       // optional: ok | warn | error → bar/percent color
+  "detail": "string"    // optional; extra footer text (e.g. due date)
+}
+```
+
+### How it renders
+
+The percentage `value / max` drives both the headline number and the fill width
+of a rounded bar. `status` colors the bar and percentage (green / amber / red);
+without it the accent color is used. The footer shows `value / max [unit]` and
+any `detail`. When `max` is 0 the bar reads 0%.
+
+---
+
 ## Card status strip
 
 Each dashboard card has an accent strip whose color reflects widget health,

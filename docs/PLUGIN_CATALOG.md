@@ -54,6 +54,12 @@ plugdash Settings UI is exported into `GITHUB_TOKEN` at startup (see
 | `github-prs` | list | 5m | Open PRs across repos with review state, CI status and draft flag |
 | `endoflife` | list | 24h | End-of-life / support countdown for languages, runtimes and OSes |
 | `osv-vulns` | list | 6h | Known vulnerabilities for a package version (OSV.dev) |
+| `dependency-freshness` | list | 24h | Direct go.mod / package.json deps vs their latest releases |
+| `github-milestone` | gauge | 30m | Milestone completion (issues closed vs total) |
+| `github-workflow-health` | timeseries | 30m | CI success rate + run-duration trend for a workflow |
+| `github-review-requested` | list | 10m | Open PRs awaiting your review |
+| `github-stale` | list | 1h | Open issues/PRs with no activity for > N days |
+| `github-dependabot` | list | 1h | Open Dependabot security alerts for a repo |
 | `file-version` | stat | 1h | Value of a variable in a file on a repo branch (e.g. a pinned dependency) |
 
 ---
@@ -534,6 +540,120 @@ List known vulnerabilities affecting a specific package version, from the free
   }
 }
 ```
+
+---
+
+## Dependency Freshness — `dependency-freshness` (visualization: `list`)
+
+Compare a repository's **direct** dependencies against their latest published
+versions. Reads a `go.mod` or `package.json` from a branch, then queries the Go
+module proxy / npm registry. Public repos need no authentication.
+
+**Default refresh interval:** 24h
+
+| Key | Label | Type | Required | Default | Notes |
+|-----|-------|------|----------|---------|-------|
+| `repo` | Repository | string | yes | — | `owner/repo` or full URL |
+| `ref` | Branch or tag | string | no | `main` | Where to read the manifest from |
+| `file` | Manifest file | string | yes | — | Path to a `go.mod` or `package.json` |
+| `count` | Max dependencies | number | no | 30 | How many deps to check (one lookup each; capped at 50) |
+| `include_dev` | Include devDependencies | bool | no | true | npm only |
+
+Each dep row shows `current X · latest Y` with a badge: `up to date` (green),
+`outdated` (amber, same major), or `major behind` (red). go.mod `// indirect`
+requires are skipped. The title summarizes how many are outdated.
+
+---
+
+## Milestone Progress — `github-milestone` (visualization: `gauge`)
+
+Show how complete a GitHub milestone is, as a progress gauge.
+
+**Default refresh interval:** 30m
+
+| Key | Label | Type | Required | Default | Notes |
+|-----|-------|------|----------|---------|-------|
+| `repo` | Repository | string | yes | — | `owner/repo` |
+| `milestone` | Milestone | string | yes | — | Milestone title, or its number |
+| `token` | GitHub token (optional) | string | no | — | Falls back to `GITHUB_TOKEN` |
+
+The gauge fills to `closed / (open + closed)` issues. It turns green at 100%, and
+red when the milestone is past its due date and not yet complete. The detail line
+shows open/closed counts and the due date.
+
+---
+
+## Workflow Health — `github-workflow-health` (visualization: `timeseries`)
+
+CI success rate and run-duration trend for a repository's GitHub Actions.
+
+**Default refresh interval:** 30m
+
+| Key | Label | Type | Required | Default | Notes |
+|-----|-------|------|----------|---------|-------|
+| `repo` | Repository | string | yes | — | `owner/repo` |
+| `workflow` | Workflow | string | no | — | Workflow file name or ID. Empty = all workflows |
+| `branch` | Branch | string | no | — | Limit to a branch |
+| `count` | Sample size | number | no | 30 | How many recent runs to sample |
+| `token` | GitHub token (optional) | string | no | — | Falls back to `GITHUB_TOKEN` |
+
+The chart plots each completed run's duration (minutes) over time; the headline
+number is the **success rate %** of the sampled completed runs. In-progress runs
+are excluded.
+
+---
+
+## Review Requested — `github-review-requested` (visualization: `list`)
+
+Open pull requests waiting for your review, via the GitHub search API.
+
+**Default refresh interval:** 10m
+
+| Key | Label | Type | Required | Default | Notes |
+|-----|-------|------|----------|---------|-------|
+| `login` | Login | string | no | — | Whose requested reviews to show. Empty = the token's user |
+| `repos` | Repositories | list | no | — | Limit to these `owner/repo` (one per line); empty = all of GitHub |
+| `count` | Number of PRs | number | no | 20 | Max PRs to show |
+| `token` | GitHub token (optional) | string | no | — | Falls back to `GITHUB_TOKEN`; required when `login` is empty |
+
+Each row links to the PR with a `review requested` badge and the repo owner's
+avatar.
+
+---
+
+## Stale Items — `github-stale` (visualization: `list`)
+
+Open issues/PRs with no activity for more than N days, across repos (search API).
+
+**Default refresh interval:** 1h
+
+| Key | Label | Type | Required | Default | Notes |
+|-----|-------|------|----------|---------|-------|
+| `repos` | Repositories | list | yes | — | One `owner/repo` per line |
+| `days` | Stale after (days) | number | no | 30 | Flag items not updated in more than this many days |
+| `type` | Type | select | no | `any` | `any`, `issue`, or `pr` |
+| `count` | Number of items | number | no | 20 | Max items to show |
+| `token` | GitHub token (optional) | string | no | — | Falls back to `GITHUB_TOKEN` |
+
+Most-stale (oldest-updated) first; each row shows a `stale Nd` badge.
+
+---
+
+## Dependabot Alerts — `github-dependabot` (visualization: `list`)
+
+Open Dependabot security alerts for a repository.
+
+**Default refresh interval:** 1h
+
+| Key | Label | Type | Required | Default | Notes |
+|-----|-------|------|----------|---------|-------|
+| `repo` | Repository | string | yes | — | `owner/repo` |
+| `count` | Number of alerts | number | no | 20 | Max alerts to show |
+| `token` | GitHub token (optional) | string | no | — | Needs security-events / repo read access; falls back to `GITHUB_TOKEN` |
+
+Each alert row links to its advisory with a severity-toned badge (critical/high →
+red, medium → amber, low → neutral); the badge prefers the CVE id. No open alerts
+renders a single green `clean` row. A `403`/`404` (no access) surfaces as an error.
 
 ---
 
