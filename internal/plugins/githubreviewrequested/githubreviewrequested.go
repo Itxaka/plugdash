@@ -129,6 +129,10 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 	items := make([]listItem, 0, len(resp.Items))
 	for _, pr := range resp.Items {
 		repoFullName := repoFromURL(pr.RepositoryURL)
+		owner := ""
+		if i := strings.Index(repoFullName, "/"); i >= 0 {
+			owner = repoFullName[:i]
+		}
 		ts := ""
 		if !pr.UpdatedAt.IsZero() {
 			ts = pr.UpdatedAt.Format(time.RFC3339)
@@ -138,6 +142,7 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 			Subtitle:  fmt.Sprintf("%s#%d · @%s", repoFullName, pr.Number, pr.User.Login),
 			URL:       pr.HTMLURL,
 			Timestamp: ts,
+			Icon:      plugins.OwnerAvatarURL(owner),
 		})
 	}
 
