@@ -167,9 +167,9 @@ trackers:
 
 Built-in plugin IDs available for `plugin`: `github-releases`,
 `github-release-artifacts`, `github-repo-stats`, `github-actions-status`,
-`github-activity`, `github-activity-rate`, `github-issues`, `http-health`,
-`rss-feed`, `docker-image`, `file-version`. External plugins are also usable by
-their registered ID.
+`github-activity`, `github-activity-rate`, `github-issues`,
+`github-issue-watch`, `http-health`, `rss-feed`, `docker-image`,
+`file-version`. External plugins are also usable by their registered ID.
 
 ### Validation rules
 

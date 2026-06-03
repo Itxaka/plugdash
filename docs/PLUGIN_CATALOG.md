@@ -50,6 +50,7 @@ plugdash Settings UI is exported into `GITHUB_TOKEN` at startup (see
 | `github-activity` | timeseries | 24h | Cumulative stars/commits/issues/PRs over time |
 | `github-activity-rate` | timeseries | 6h | Per-period counts of stars/commits/issues/PRs |
 | `github-issues` | list | 15m | Latest open issues needing a first reply across repos |
+| `github-issue-watch` | list | 15m | Specific issues/PRs: answered state, time since last reply, CI status |
 | `file-version` | stat | 1h | Value of a variable in a file on a repo branch (e.g. a pinned dependency) |
 
 ---
@@ -374,6 +375,45 @@ filtered out. `exclude_labels` drops issues tagged with e.g. `blocked` or
 `need-discussion`. Issues with zero comments get a `no reply` badge, and each
 item shows its repo owner's avatar. (The `github-actions-status` checklist items
 likewise show the org avatar per repo.)
+
+---
+
+## Issue Watcher — `github-issue-watch` (visualization: `list`)
+
+Watch a specific set of issues and/or pull requests. Each tracked item becomes a
+list row showing whether it has been **answered**, how long since the **last
+interaction**, and — for pull requests — its **CI status**.
+
+**Default refresh interval:** 15m
+
+| Key | Label | Type | Required | Default | Notes |
+|-----|-------|------|----------|---------|-------|
+| `issues` | Issues / PRs | list | yes | — | One per line: `owner/repo#number`, or a full issue/PR URL |
+| `token` | GitHub token (optional) | string | no | — | Raises rate limits; falls back to `GITHUB_TOKEN` |
+
+**Behaviors:**
+
+- **Answered** = the most recent comment is from someone other than the issue
+  author. An item with no comments is "no reply". Determined by fetching only the
+  last page of comments (computed from the issue's comment count).
+- **Last interaction** = the time of the most recent comment (or creation if
+  none); the row's right-hand timestamp ages it live ("3h ago"). The subtitle
+  reads `owner/repo#N · issue|PR · state · last reply|opened`.
+- **CI** applies only to pull requests: the head commit's check runs are
+  aggregated into a `CI: passing` / `CI: failing` / `CI: running` / `CI: no
+  checks` badge. Plain issues show no CI badge.
+- Badges are tone-colored pills (answered/CI). A bad ref or a per-item fetch
+  error renders as an `invalid` / `error` row rather than failing the whole run.
+
+```json
+{
+  "plugin_id": "github-issue-watch",
+  "name": "My watched issues",
+  "config": {
+    "issues": "kairos-io/kairos#1234\nhttps://github.com/kairos-io/kairos/pull/56"
+  }
+}
+```
 
 ---
 

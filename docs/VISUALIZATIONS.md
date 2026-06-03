@@ -53,7 +53,11 @@ timestamp, and badge pill. Used by `github-releases`, `github-issues`,
       "subtitle":  "string",   // optional; rendered as muted secondary line
       "url":       "string",   // optional; if present, the title becomes a link
       "timestamp": "string",   // optional; RFC3339 or any Date-parseable string, shown relative
-      "badge":     "string"    // optional; rendered as a small pill on the right
+      "badge":     "string",   // optional; rendered as a small pill on the right
+      "icon":      "string",   // optional; image URL shown as a small avatar (e.g. repo owner)
+      "badges": [              // optional; multiple tone-colored pills (e.g. answered + CI)
+        { "label": "string", "tone": "ok|warn|bad|neutral" }
+      ]
     }
   ]
 }
@@ -73,6 +77,12 @@ Field-by-field:
   absolute localized date (`Mon DD, YYYY`) beyond that. Unparseable values are
   shown verbatim.
 - `badge` — optional short label rendered as a `.pill`.
+- `icon` — optional image URL rendered as a small left-hand avatar (used by
+  `github-issues` and `github-issue-watch` for the repo owner).
+- `badges` — optional array of `{label, tone}` rendered as additional pills, each
+  colored by `tone` (`ok` green, `warn` amber, `bad` red, `neutral` default).
+  Used by `github-issue-watch` for the answered and CI badges. Coexists with the
+  single `badge` field.
 
 ### Example
 
