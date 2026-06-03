@@ -439,7 +439,7 @@ discovery requirements.
 | `-addr` | — | `:8080` | HTTP listen address |
 | `-db` | — | `plugdash.db` | SQLite database file path |
 | `-plugins-dir` | `PLUGDASH_PLUGINS_DIR` | `~/.config/plugdash/plugins` | external plugins directory |
-| `-config` | — | unset | declarative config file (YAML); trackers reconciled read-only into the DB |
+| `-config` | — | unset | declarative config file (YAML); trackers reconciled into the DB (not UI-editable, but deletable) |
 | `-debug` | `PLUGDASH_DEBUG=1` | off | verbose debug logging (also toggleable in Settings) |
 | `-version` | — | off | print the version and exit |
 | — | `GITHUB_TOKEN` | unset | token for GitHub plugins (also settable in Settings) |

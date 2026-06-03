@@ -17,6 +17,13 @@ binary with the frontend embedded.
 
 ### Highlights
 
+- **A library of widgets.** ~20 built-in plugins — GitHub releases/PRs/issues/CI/
+  activity/milestones, a review queue, stale-item and end-of-life trackers,
+  dependency-freshness and OSV vulnerability checks, HTTP health, RSS, Docker
+  image checks, and more. See [docs/PLUGIN_CATALOG.md](docs/PLUGIN_CATALOG.md).
+- **Per-widget sizing & text size.** Widgets can ask for a wider/taller tile, and
+  a per-browser text-size preference packs more info per card or makes it easier
+  to read.
 - **Live updates over SSE.** The browser subscribes to a stream
   (`/api/stream`) and results are pushed as they're ready — no manual reload.
   A **Live** toggle (on by default) controls it.
@@ -150,7 +157,7 @@ Dashboard cards are **drag-and-drop reorderable**, and the chosen order
 | `-addr` | `:8080`       | HTTP listen address.                 |
 | `-db`   | `plugdash.db` | Path to the SQLite database file. Resolved to an absolute path at startup; created if it does not exist. |
 | `-plugins-dir` | _(see below)_ | Directory of external plugin executables. Defaults to `$PLUGDASH_PLUGINS_DIR`, else `~/.config/plugdash/plugins`. |
-| `-config` | _(none)_ | Path to a declarative config file (YAML, "config-as-code"). Trackers in it are reconciled into the DB and shown read-only in the UI. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md). |
+| `-config` | _(none)_ | Path to a declarative config file (YAML, "config-as-code"). Trackers in it are reconciled into the DB and carry a `config` badge (not editable from the UI, but deletable — a reload restores them). See [docs/CONFIGURATION.md](docs/CONFIGURATION.md). |
 | `-debug` | `false` | Verbose logging (each run, outbound queries, plugin output). Also via `PLUGDASH_DEBUG=1` or the Settings toggle. |
 | `-version` | `false` | Print the version and exit. |
 
@@ -203,12 +210,17 @@ appropriate status code.
 | `POST`   | `/api/plugins/rescan`      | Re-scan the external plugins directory.            |
 | `GET`    | `/api/trackers`            | List all saved trackers.                           |
 | `POST`   | `/api/trackers`            | Create a tracker.                                  |
-| `PUT`    | `/api/trackers/{id}`       | Update a tracker. `403` if managed by config (`source="file"`). |
-| `DELETE` | `/api/trackers/{id}`       | Delete a tracker. `204` on success, `404` if missing, `403` if managed by config. |
+| `PUT`    | `/api/trackers/{id}`       | Update a tracker. `403` if managed by config (`source="file"`, not editable). |
+| `DELETE` | `/api/trackers/{id}`       | Delete a tracker (file-managed ones included). `204` on success, `404` if missing. |
+| `POST`   | `/api/trackers/clear`      | Delete every tracker (db + file).                  |
+| `POST`   | `/api/trackers/reload`     | Re-reconcile trackers from the `--config` file (`409` if none). |
+| `POST`   | `/api/trackers/import`     | Load trackers from a config document in the body (session-only). |
+| `GET`    | `/api/trackers/export`     | Download the current trackers as a config YAML.    |
 | `GET`    | `/api/trackers/{id}/run`   | Return the cached snapshot for a tracker; `?force=true` enqueues an immediate re-run. |
 | `GET`    | `/api/run`                 | Return the cached snapshots for all trackers (counts as a presence poll). |
 | `GET`    | `/api/stream`              | Server-Sent Events stream of snapshot frames.      |
-| `GET`    | `/api/settings`            | Get persisted settings (GitHub token, debug).      |
+| `GET`    | `/api/config`              | Whether a declarative config file is configured.   |
+| `GET`    | `/api/settings`            | Get persisted settings (GitHub token, debug, widget sizing). |
 | `PUT`    | `/api/settings`            | Update persisted settings.                         |
 | `GET`    | `/api/logs`                | Recent log entries from the in-memory ring.        |
 | `DELETE` | `/api/logs`                | Clear the in-memory log ring.                      |
@@ -349,160 +361,34 @@ On a plugin failure:
 
 ## Built-in plugins
 
-Plugins registered by default in `cmd/plugdash/main.go`:
+plugdash ships ~20 built-in plugins, registered in `cmd/plugdash/main.go`. Full
+config fields, behaviors and screenshots live in
+[docs/PLUGIN_CATALOG.md](docs/PLUGIN_CATALOG.md).
 
-### GitHub Releases — `github-releases` (visualization: `list`)
+| id | viz | Tracks |
+|----|-----|--------|
+| `github-releases` | list | Latest N releases of a repo |
+| `github-release-artifacts` | checklist | A release contains the expected asset files |
+| `github-repo-stats` | table | Stars, forks, open issues, watchers, language |
+| `github-actions-status` | checklist | CI status of the latest commit across repos |
+| `github-activity` | timeseries | Cumulative stars/commits/issues/PRs over time |
+| `github-activity-rate` | timeseries | Per-period counts of stars/commits/issues/PRs |
+| `github-issues` | list | Open issues needing a first reply across repos |
+| `github-issue-watch` | list | Specific issues/PRs: answered state, last reply, CI |
+| `github-prs` | list | Open PR review queue (review state + CI + draft) |
+| `github-review-requested` | list | Open (non-draft) PRs awaiting your review |
+| `github-stale` | list | Open issues/PRs with no activity for > N days |
+| `github-milestone` | gauge | Milestone completion (issues closed vs total) |
+| `github-workflow-health` | timeseries | CI success rate + run-duration trend |
+| `dependency-freshness` | list | go.mod / package.json deps vs their latest releases |
+| `endoflife` | list | End-of-life / support countdown (endoflife.date) |
+| `osv-vulns` | list | Known vulnerabilities for a package version (OSV.dev) |
+| `http-health` | stat | An HTTP endpoint is up and returns the expected status |
+| `rss-feed` | list | Latest entries of an RSS 2.0 / Atom feed |
+| `docker-image` | checklist | Image tags (and arches) exist in a registry |
+| `file-version` | stat | A named variable's value in a file on a repo branch |
 
-Tracks the most recent releases of a repository.
-
-| Key     | Label                    | Type     | Required | Default | Notes |
-| ------- | ------------------------ | -------- | -------- | ------- | ----- |
-| `repo`  | Repository               | `string` | yes      | —       | `owner/repo` or a full GitHub URL. |
-| `count` | Number of releases       | `number` | no       | `5`     | How many recent releases to show. |
-| `token` | GitHub token (optional)  | `string` | no       | —       | Raises rate limits; falls back to `GITHUB_TOKEN`. |
-
-### GitHub Release Artifacts — `github-release-artifacts` (visualization: `checklist`)
-
-Checks that a release contains an expected set of artifacts (with `*`/`?` glob
-support).
-
-| Key        | Label                   | Type     | Required | Notes |
-| ---------- | ----------------------- | -------- | -------- | ----- |
-| `repo`     | Repository              | `string` | yes      | `owner/repo` or full URL. |
-| `tag`      | Release tag             | `string` | no       | Tag to check; empty or `latest` uses the most recent release. |
-| `expected` | Expected artifacts      | `list`   | yes      | One artifact name per line; supports `*` and `?` glob wildcards. |
-| `token`    | GitHub token (optional) | `string` | no       | Raises rate limits; falls back to `GITHUB_TOKEN`. |
-
-### More built-in plugins
-
-These are also registered by default in `cmd/plugdash/main.go`.
-
-#### GitHub Repo Stats — `github-repo-stats` (visualization: `table`)
-
-Shows stars, forks, open issues, watchers and language for a repository.
-
-| Key     | Label        | Type     | Required | Notes |
-| ------- | ------------ | -------- | -------- | ----- |
-| `repo`  | Repository   | `string` | yes      | `owner/repo` or full URL. |
-| `token` | GitHub token | `string` | no       | Falls back to `GITHUB_TOKEN`. |
-
-#### HTTP Health Check — `http-health` (visualization: `stat`)
-
-Checks that an HTTP endpoint is reachable and returns the expected status code.
-A failed request or unexpected status is reported as a result (UP / DOWN /
-status code), not an error.
-
-| Key               | Label             | Type     | Required | Default | Notes |
-| ----------------- | ----------------- | -------- | -------- | ------- | ----- |
-| `url`             | URL               | `string` | yes      | —       | `https://` is assumed if no scheme is given. |
-| `expected_status` | Expected status   | `number` | no       | `200`   | Expected HTTP status code. |
-| `timeout_seconds` | Timeout (seconds) | `number` | no       | `10`    | Per-request timeout. |
-
-#### RSS / Atom Feed — `rss-feed` (visualization: `list`)
-
-Shows the latest entries from an RSS 2.0 or Atom feed.
-
-| Key     | Label             | Type     | Required | Default | Notes |
-| ------- | ----------------- | -------- | -------- | ------- | ----- |
-| `url`   | Feed URL          | `string` | yes      | —       | URL of an RSS 2.0 or Atom feed. |
-| `count` | Number of entries | `number` | no       | `5`     | How many recent entries to show. |
-
-#### GitHub Actions Status — `github-actions-status` (visualization: `checklist`)
-
-A birds-eye CI view across many repositories. For each repo it reports whether
-the latest commit on the default (or a chosen) branch is passing CI, as reported
-by the GitHub Actions / checks API. Each checklist item links to the relevant
-run or repo. Default refresh interval: **2 minutes**.
-
-| Key      | Label        | Type     | Required | Notes |
-| -------- | ------------ | -------- | -------- | ----- |
-| `repos`  | Repositories | `list`   | yes      | One `owner/repo` per line. |
-| `branch` | Branch       | `string` | no       | Leave empty to use each repo's default branch. |
-| `token`  | GitHub Token | `string` | no       | Falls back to `GITHUB_TOKEN`. |
-
-#### GitHub Activity Over Time — `github-activity` (visualization: `timeseries`)
-
-Plots a repository's **stars, commits, issues, or pull requests** over time as a
-cumulative line chart. The series is computed **live** on every run from the
-timestamps GitHub attaches to each item (nothing is persisted between runs); the
-daily cumulative series is downsampled to fit the chart. Default refresh
-interval: **24 hours**.
-
-| Key         | Label        | Type     | Required | Default | Notes |
-| ----------- | ------------ | -------- | -------- | ------- | ----- |
-| `repo`      | Repository   | `string` | yes      | —       | `owner/repo` or full URL. |
-| `metric`    | Metric       | `select` | no       | `stars` | One of `stars`, `commits`, `issues`, `prs`. |
-| `token`     | GitHub token | `string` | no       | —       | Falls back to `GITHUB_TOKEN`. |
-| `max_pages` | Max pages    | `number` | no       | `30`    | Pages of 100 items to fetch; caps history depth and API usage. |
-
-> Note: commits/issues/PRs are fetched newest-first, so for very active repos the
-> chart reflects the most recent `max_pages × 100` items.
-
-#### GitHub Activity Rate — `github-activity-rate` (visualization: `timeseries`)
-
-Plots **how many** commits / issues / PRs / stars happened **per day, week or
-month** (per-period counts, not cumulative) — the activity rhythm of a repo.
-Default refresh interval: **6 hours**.
-
-| Key         | Label      | Type     | Required | Default   | Notes |
-| ----------- | ---------- | -------- | -------- | --------- | ----- |
-| `repo`      | Repository | `string` | yes      | —         | `owner/repo`. |
-| `metric`    | Metric     | `select` | no       | `commits` | `stars`/`commits`/`issues`/`prs`. |
-| `period`    | Period     | `select` | no       | `week`    | `day`/`week`/`month`; quiet periods show as 0. |
-| `token`     | GitHub token | `string` | no     | —         | Falls back to `GITHUB_TOKEN`. |
-| `max_pages` | Max pages  | `number` | no       | `20`      | Pages of 100 items; caps the window. |
-
-#### Issues Needing Attention — `github-issues` (visualization: `list`)
-
-Lists the latest **open issues with no response yet** (zero comments) across one
-or more repos — a birds-eye of what needs triage. PRs are excluded. Default
-refresh interval: **15 minutes**.
-
-| Key               | Label            | Type     | Required | Default | Notes |
-| ----------------- | ---------------- | -------- | -------- | ------- | ----- |
-| `repos`           | Repositories     | `list`   | yes      | —       | One `owner/repo` per line. |
-| `unanswered_only` | Unanswered only  | `bool`   | no       | `true`  | Only issues with zero comments. |
-| `count`           | Max issues       | `number` | no       | `10`    | Total issues to show. |
-| `token`           | GitHub token     | `string` | no       | —       | Falls back to `GITHUB_TOKEN`. |
-
-#### Docker Image Check — `docker-image` (visualization: `checklist`)
-
-Checks whether Docker images exist in a registry for a set of tags and
-architectures. Supports Docker Hub (`nginx`, `org/img`) and `ghcr.io`, plus a
-generic Docker Registry v2 bearer-token fallback. Multi-arch presence is read
-from the manifest list/OCI index; a single-arch (non-index) tag is reported as
-present with the arch left "unverified". Default refresh interval: **24 hours**.
-
-Tags can be listed manually and/or derived from a GitHub repo's latest stable
-release (the `/releases/latest` tag). A derived tag is checked in both its
-`vX.Y.Z` and `X.Y.Z` forms and passes if either image tag exists — handy when
-your Docker tags drop the leading `v`. At least one of `tags` / `tag_source` is
-required.
-
-| Key            | Label                | Type     | Required | Notes |
-| -------------- | -------------------- | -------- | -------- | ----- |
-| `image`        | Image                | `string` | yes      | Image ref without a tag, e.g. `ghcr.io/org/repo` or `nginx`. |
-| `tags`         | Tags                 | `list`   | no*      | One tag per line. |
-| `tag_source`   | Tag from GitHub repo | `string` | no*      | `owner/repo`; also checks its latest stable release tag (both `vX.Y.Z` and `X.Y.Z`). |
-| `arches`       | Architectures        | `list`   | no       | e.g. `amd64`, `arm64`. Empty = only check tag existence. |
-| `token`        | Registry token       | `string` | no       | Bearer token for private images. |
-| `github_token` | GitHub token         | `string` | no       | Used only to resolve `tag_source`. Falls back to `GITHUB_TOKEN`. |
-
-\* Provide `tags`, `tag_source`, or both.
-
-#### File Value Watcher — `file-version` (visualization: `stat`)
-
-Reads a file on a GitHub repo branch (over `raw.githubusercontent.com`, public
-repos only) and reports the value of a named variable as a single stat — handy
-for watching a pinned dependency or the `go` directive in a `go.mod`. Default
-refresh interval: **1 hour**.
-
-| Key    | Label          | Type     | Required | Default | Notes |
-| ------ | -------------- | -------- | -------- | ------- | ----- |
-| `repo` | Repository     | `string` | yes      | —       | `owner/repo` or full URL. |
-| `ref`  | Branch or tag  | `string` | no       | `main`  | Branch/tag to read from. |
-| `path` | File path      | `string` | yes      | —       | Path to the file within the repo. |
-| `key`  | Variable name  | `string` | yes      | —       | Name left of a `=` / `:` (or whitespace, e.g. the `go.mod` `go` directive). |
+GitHub plugins fall back to `GITHUB_TOKEN`; `endoflife` and `osv-vulns` need no auth.
 
 ## Writing a plugin
 

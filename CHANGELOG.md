@@ -4,6 +4,22 @@ All notable changes to plugdash are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-06-03
+
+### Added
+
+- **Text size preference** (Small / Normal / Large) in Settings — scales widget
+  content (not the tile) so Small packs more info per card and Large is easier to
+  read. A per-browser preference like the theme (localStorage, applied pre-paint).
+
+### Changed
+
+- `github-review-requested` excludes **draft** PRs (`draft:false`) — drafts
+  aren't ready for review.
+- README and docs accuracy pass: a full built-in-plugin table (all ~20) linking
+  to the catalog, corrected file-tracker wording (deletable, not editable) and
+  the new tracker endpoints in the API overview.
+
 ## [0.4.0] - 2026-06-03
 
 A big batch of new widgets, a new visualization, and per-widget sizing.
@@ -138,6 +154,7 @@ declarative configuration, and makes the result cache survive restarts.
   client, no server calls) instead of freezing on "just now" until a full page
   reload; the exact fetch time is available on hover.
 
+[0.4.1]: https://github.com/Itxaka/plugdash/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Itxaka/plugdash/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Itxaka/plugdash/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Itxaka/plugdash/compare/v0.1.6...v0.2.0
