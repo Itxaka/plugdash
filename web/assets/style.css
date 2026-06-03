@@ -66,6 +66,18 @@ html[data-theme="light"] {
   box-sizing: border-box;
 }
 
+/* Text size — a per-browser display preference (like the theme). Scales the
+   whole UI proportionally via zoom; default (no attribute) is 1. */
+html[data-font-scale="small"] {
+  --ui-scale: 0.9;
+}
+html[data-font-scale="large"] {
+  --ui-scale: 1.12;
+}
+body {
+  zoom: var(--ui-scale, 1);
+}
+
 html,
 body {
   margin: 0;

@@ -321,7 +321,17 @@ are described under "Dashboard rendering" above.
 > card to self-refresh, with a `hydrateOrRefresh` cache-vs-fetch policy on load.
 > **All of that is gone.** The server-side engine plus the SSE stream replaces
 > it: there is no client widget cache and no client refresh timer. The only
-> remaining browser `localStorage` use is the theme preference (`plugdash:theme`).
+> remaining browser `localStorage` use is per-browser display preferences: the
+> theme (`plugdash:theme`) and the text size (`plugdash:fontscale`).
+
+## Text size
+
+A per-browser display preference, like the theme. The Settings view offers
+**Small / Normal / Large**; `applyFontScale` sets `html[data-font-scale]` and
+saves it to `localStorage` (`plugdash:fontscale`), and the inline pre-paint
+script in `index.html` re-applies it before first paint to avoid a flash. CSS
+maps the attribute to a `--ui-scale` and scales the whole UI via `body { zoom }`.
+It is client-only — not part of the server-side settings.
 
 ## Edit mode
 

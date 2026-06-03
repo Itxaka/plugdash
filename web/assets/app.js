@@ -1812,6 +1812,30 @@ async function renderSettings() {
     ])
   );
 
+  // Text size: a per-browser display preference (like the theme), applied live
+  // and saved to localStorage — independent of the server-side settings below.
+  const fontSel = el(
+    "select",
+    { id: "set-fontscale" },
+    [
+      el("option", { value: "small", text: "Small" }),
+      el("option", { value: "normal", text: "Normal" }),
+      el("option", { value: "large", text: "Large" }),
+    ]
+  );
+  fontSel.value = currentFontScale();
+  fontSel.addEventListener("change", () => applyFontScale(fontSel.value));
+  panel.appendChild(
+    el("div", { class: "field" }, [
+      el("label", { for: "set-fontscale", text: "Text size" }),
+      fontSel,
+      el("div", {
+        class: "help",
+        text: "Scales the whole dashboard. Saved in this browser (like the theme), applied instantly.",
+      }),
+    ])
+  );
+
   const ghToken = el("input", {
     type: "password",
     id: "set-ghtoken",
@@ -2000,6 +2024,27 @@ function applyTheme(t) {
   if (btn) btn.textContent = t === "light" ? "☀️" : "🌙";
   try {
     localStorage.setItem(THEME_KEY, t);
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+/* ---------- text size (per-browser display preference) ---------- */
+const FONTSCALE_KEY = "plugdash:fontscale";
+
+function currentFontScale() {
+  const v = document.documentElement.dataset.fontScale;
+  return v === "small" || v === "large" ? v : "normal";
+}
+
+function applyFontScale(scale) {
+  if (scale === "small" || scale === "large") {
+    document.documentElement.dataset.fontScale = scale;
+  } else {
+    delete document.documentElement.dataset.fontScale;
+  }
+  try {
+    localStorage.setItem(FONTSCALE_KEY, scale);
   } catch (e) {
     /* ignore */
   }

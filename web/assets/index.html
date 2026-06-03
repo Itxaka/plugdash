@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>plugdash</title>
-  <!-- Apply the saved theme before first paint to avoid a flash.
+  <!-- Apply the saved theme and text size before first paint to avoid a flash.
        A ?theme=light|dark query param overrides and is persisted. -->
   <script>
     try {
@@ -12,6 +12,8 @@
       var t = q || localStorage.getItem("plugdash:theme");
       if (t === "light") document.documentElement.dataset.theme = "light";
       if (q) localStorage.setItem("plugdash:theme", q);
+      var fs = localStorage.getItem("plugdash:fontscale");
+      if (fs === "small" || fs === "large") document.documentElement.dataset.fontScale = fs;
     } catch (e) {}
   </script>
   <link rel="stylesheet" href="/style.css" />
