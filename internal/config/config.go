@@ -116,6 +116,47 @@ func slugify(s string) string {
 	return strings.Trim(s, "-")
 }
 
+// exportDoc is the YAML shape produced by Marshal: a bare trackers list, with
+// no settings block so secrets (e.g. the GitHub token) never land in a dump.
+type exportDoc struct {
+	Trackers []TrackerSpec `yaml:"trackers"`
+}
+
+// Marshal serializes trackers into a plugdash config document (trackers only).
+// It is the inverse of Parse: the output can be fed back via --config or the
+// import endpoint. Each tracker gets a stable, unique key — its existing
+// ConfigKey when present (file-sourced), otherwise a slug of its name, with the
+// tracker id appended on collision so the result re-parses without duplicate
+// keys.
+func Marshal(trackers []*store.Tracker) ([]byte, error) {
+	seen := map[string]bool{}
+	specs := make([]TrackerSpec, 0, len(trackers))
+	for _, t := range trackers {
+		if t == nil {
+			continue
+		}
+		key := t.ConfigKey
+		if key == "" {
+			key = slugify(t.Name)
+		}
+		if key == "" {
+			key = fmt.Sprintf("tracker-%d", t.ID)
+		}
+		if seen[key] {
+			key = fmt.Sprintf("%s-%d", key, t.ID)
+		}
+		seen[key] = true
+		specs = append(specs, TrackerSpec{
+			Key:                    key,
+			Plugin:                 t.PluginID,
+			Name:                   t.Name,
+			RefreshIntervalSeconds: t.RefreshIntervalSeconds,
+			Config:                 t.Config,
+		})
+	}
+	return yaml.Marshal(exportDoc{Trackers: specs})
+}
+
 // FileTrackers maps the parsed tracker specs to store.FileTracker values for
 // reconciliation.
 func (c *Config) FileTrackers() []store.FileTracker {

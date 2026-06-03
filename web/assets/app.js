@@ -83,6 +83,15 @@ const API = {
   forceTracker: (id) =>
     api(`/api/trackers/${encodeURIComponent(id)}/run?force=true`),
   rescanPlugins: () => api("/api/plugins/rescan", { method: "POST" }),
+  clearTrackers: () => api("/api/trackers/clear", { method: "POST" }),
+  reloadTrackers: () => api("/api/trackers/reload", { method: "POST" }),
+  importTrackers: (yaml) =>
+    api("/api/trackers/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-yaml" },
+      body: yaml,
+    }),
+  getConfig: () => api("/api/config"),
   getLogs: () => api("/api/logs"),
   clearLogs: () => api("/api/logs", { method: "DELETE" }),
   getSettings: () => api("/api/settings"),
@@ -765,8 +774,10 @@ function buildCardShell(tracker) {
   });
 
   // Edit-mode actions (hidden unless the dashboard is in edit mode).
+  // File-managed widgets can be deleted (restored via "Reload from file") but
+  // not edited (a reload would overwrite the change).
   const editBtn = isFile ? null : el("button", { class: "card-act", title: "Edit widget", text: "✎" });
-  const deleteBtn = isFile ? null : el("button", { class: "card-act danger", title: "Delete widget", text: "✕" });
+  const deleteBtn = el("button", { class: "card-act danger", title: "Delete widget", text: "✕" });
   const actionsEl = el("div", { class: "card-actions" }, [editBtn, deleteBtn]);
   const bodyEl = el("div", { class: "card-body" }, [
     el("div", { class: "skeleton", text: "Running…" }),
@@ -978,6 +989,166 @@ function fillCardError(card, tracker, message, intervalSec, at) {
    ============================================================ */
 let pluginsCache = null;
 
+// buildTrackerActions renders the bulk-action bar for the Trackers view:
+// reload from the configured file, load an external config (session-only),
+// dump the current trackers to a config file, and clear everything. onChanged
+// is called after any action that mutates the tracker set, to refresh the list.
+function buildTrackerActions(onChanged) {
+  const msg = el("div", { class: "form-msg" });
+  const ok = (t) => {
+    msg.className = "form-msg ok";
+    msg.textContent = t;
+  };
+  const err = (t) => {
+    msg.className = "form-msg error";
+    msg.textContent = t;
+  };
+  const clearMsg = () => {
+    msg.className = "form-msg";
+    msg.textContent = "";
+  };
+
+  // Reload from the server's --config file (enabled only when one is set).
+  const reloadBtn = el("button", {
+    class: "btn btn-sm",
+    text: "Reload from file",
+    title: "Re-apply the server's --config file (no duplicates)",
+    disabled: true,
+  });
+  reloadBtn.addEventListener("click", async () => {
+    clearMsg();
+    reloadBtn.disabled = true;
+    try {
+      const r = await API.reloadTrackers();
+      ok(`Reloaded ${r.trackers} tracker(s) from the config file.`);
+      await onChanged();
+    } catch (e) {
+      err("Reload failed: " + (e.message || e));
+    } finally {
+      reloadBtn.disabled = false;
+    }
+  });
+  // Only enable reload when the server reports a config file.
+  API.getConfig()
+    .then((c) => {
+      if (c && c.configured) {
+        reloadBtn.disabled = false;
+        reloadBtn.title = "Re-apply " + (c.path || "the --config file") + " (no duplicates)";
+      } else {
+        reloadBtn.title = "Start plugdash with --config to enable reloading from a file";
+      }
+    })
+    .catch(() => {});
+
+  // Load an external config file or pasted YAML (session-only).
+  const fileInput = el("input", {
+    type: "file",
+    accept: ".yaml,.yml,.txt",
+    style: "display:none",
+  });
+  const importYAML = async (yaml) => {
+    clearMsg();
+    if (!yaml || !yaml.trim()) {
+      err("Nothing to load — the config was empty.");
+      return;
+    }
+    try {
+      const r = await API.importTrackers(yaml);
+      ok(`Loaded ${r.loaded} tracker(s). These are session-only — a restart reverts to the bundled config.`);
+      await onChanged();
+    } catch (e) {
+      err("Load failed: " + (e.message || e));
+    }
+  };
+  fileInput.addEventListener("change", async () => {
+    const f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    try {
+      const text = await f.text();
+      await importYAML(text);
+    } catch (e) {
+      err("Could not read file: " + (e.message || e));
+    } finally {
+      fileInput.value = ""; // allow re-selecting the same file
+    }
+  });
+  const loadBtn = el("button", {
+    class: "btn btn-sm",
+    text: "Load from file…",
+    title: "Load trackers from a config file (session-only)",
+  });
+  loadBtn.addEventListener("click", () => fileInput.click());
+
+  // Paste-config toggle: reveals a textarea + Load button.
+  const pasteArea = el("textarea", {
+    class: "import-paste",
+    placeholder: "Paste a plugdash config (YAML) here…",
+    style: "display:none",
+  });
+  const pasteLoadBtn = el("button", {
+    class: "btn btn-sm btn-primary",
+    text: "Load pasted config",
+    style: "display:none",
+  });
+  pasteLoadBtn.addEventListener("click", () => importYAML(pasteArea.value));
+  const pasteToggle = el("button", {
+    class: "btn btn-sm",
+    text: "Paste config…",
+    title: "Paste a config to load (session-only)",
+  });
+  pasteToggle.addEventListener("click", () => {
+    const open = pasteArea.style.display === "none";
+    pasteArea.style.display = open ? "" : "none";
+    pasteLoadBtn.style.display = open ? "" : "none";
+  });
+
+  // Dump the current trackers to a downloadable config file.
+  const dumpBtn = el("a", {
+    class: "btn btn-sm",
+    href: "/api/trackers/export",
+    download: "plugdash-trackers.yaml",
+    text: "Dump to config",
+    title: "Download the current trackers as a config file",
+  });
+
+  // Clear everything currently running (on-disk config is left untouched).
+  const clearBtn = el("button", {
+    class: "btn btn-sm btn-danger",
+    text: "Clear all",
+    title: "Remove all trackers from the running dashboard",
+  });
+  clearBtn.addEventListener("click", async () => {
+    if (!confirm("Remove ALL trackers from the running dashboard? The config file on disk is left untouched, so 'Reload from file' (or a restart) restores file-managed trackers.")) {
+      return;
+    }
+    clearMsg();
+    clearBtn.disabled = true;
+    try {
+      const r = await API.clearTrackers();
+      ok(`Cleared ${r.cleared} tracker(s).`);
+      await onChanged();
+    } catch (e) {
+      err("Clear failed: " + (e.message || e));
+    } finally {
+      clearBtn.disabled = false;
+    }
+  });
+
+  return el("div", { class: "tracker-actions-bar" }, [
+    el("div", { class: "tracker-actions-row" }, [
+      reloadBtn,
+      loadBtn,
+      pasteToggle,
+      dumpBtn,
+      clearBtn,
+      fileInput,
+    ]),
+    pasteArea,
+    pasteLoadBtn,
+    msg,
+  ]);
+}
+
 async function renderConfigure() {
   clear(main);
 
@@ -989,6 +1160,10 @@ async function renderConfigure() {
       ]),
     ])
   );
+
+  // Bulk actions: clear the running set, reload the configured file, import an
+  // external config (session-only), or dump the current trackers to a config.
+  main.appendChild(buildTrackerActions(() => afterChange()));
 
   const layout = el("div", { class: "config-layout" });
   const listPanel = el("div", { class: "panel" }, [
@@ -1034,8 +1209,9 @@ async function renderConfigure() {
       const pluginName = (plugin && plugin.name) || t.plugin_id || "unknown plugin";
 
       const isFile = t.source === "file";
+      // Editing a file-managed tracker is blocked (a reload would overwrite it),
+      // but deleting one is allowed — "Reload from file" restores it.
       let editBtn = null;
-      let delBtn = null;
       if (!isFile) {
         editBtn = el("button", {
           class: "btn btn-ghost btn-sm",
@@ -1045,24 +1221,24 @@ async function renderConfigure() {
           buildForm(formPanel, plugins, afterChange, t);
           formPanel.scrollIntoView({ behavior: "smooth", block: "start" });
         });
-
-        delBtn = el("button", {
-          class: "btn btn-danger btn-sm",
-          text: "Delete",
-        });
-        delBtn.addEventListener("click", async () => {
-          delBtn.disabled = true;
-          delBtn.textContent = "Deleting…";
-          try {
-            await API.deleteTracker(t.id);
-            await afterChange();
-          } catch (e) {
-            delBtn.disabled = false;
-            delBtn.textContent = "Delete";
-            alert("Delete failed: " + (e.message || e));
-          }
-        });
       }
+
+      const delBtn = el("button", {
+        class: "btn btn-danger btn-sm",
+        text: "Delete",
+      });
+      delBtn.addEventListener("click", async () => {
+        delBtn.disabled = true;
+        delBtn.textContent = "Deleting…";
+        try {
+          await API.deleteTracker(t.id);
+          await afterChange();
+        } catch (e) {
+          delBtn.disabled = false;
+          delBtn.textContent = "Delete";
+          alert("Delete failed: " + (e.message || e));
+        }
+      });
       const configBadge = isFile
         ? el("span", {
             class: "config-badge",

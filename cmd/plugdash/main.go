@@ -127,6 +127,9 @@ func main() {
 
 	srv := server.New(reg, st, web.FS())
 	srv.SetLogging(logger, logRing, level)
+	// Expose the declarative config path so the UI's "reload from file" action
+	// can re-reconcile from it.
+	srv.SetConfigPath(*configPath)
 
 	// External plugins: discover executables in the plugins directory and
 	// register them alongside the built-ins. The directory is resolved from the

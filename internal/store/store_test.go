@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // openTestStore opens a Store backed by a fresh database file inside the test's
@@ -172,5 +173,50 @@ func TestGetTrackerNotFound(t *testing.T) {
 	_, err := s.GetTracker(12345)
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Errorf("GetTracker(non-existent) returned %v, want sql.ErrNoRows", err)
+	}
+}
+
+func TestClearTrackers(t *testing.T) {
+	s := openTestStore(t)
+
+	// One user (db) tracker and one file-managed tracker.
+	db, err := s.CreateTracker("p", "user", nil, 0)
+	if err != nil {
+		t.Fatalf("CreateTracker: %v", err)
+	}
+	if err := s.ReconcileFileTrackers([]FileTracker{{Key: "a", PluginID: "p", Name: "File A"}}); err != nil {
+		t.Fatalf("ReconcileFileTrackers: %v", err)
+	}
+	// A snapshot for the db tracker, to confirm the cascade fires.
+	if err := s.SaveSnapshot(SnapshotRow{TrackerID: db.ID, PluginID: "p", Name: "user", FetchedAt: time.Now()}); err != nil {
+		t.Fatalf("SaveSnapshot: %v", err)
+	}
+
+	n, err := s.ClearTrackers()
+	if err != nil {
+		t.Fatalf("ClearTrackers: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("cleared %d, want 2 (db + file)", n)
+	}
+
+	list, err := s.ListTrackers()
+	if err != nil {
+		t.Fatalf("ListTrackers: %v", err)
+	}
+	if len(list) != 0 {
+		t.Errorf("after clear, %d trackers remain, want 0", len(list))
+	}
+	snaps, err := s.LoadSnapshots()
+	if err != nil {
+		t.Fatalf("LoadSnapshots: %v", err)
+	}
+	if len(snaps) != 0 {
+		t.Errorf("snapshots not cascade-deleted on clear: %d remain", len(snaps))
+	}
+
+	// Clearing an already-empty store is a no-op returning 0.
+	if n, err := s.ClearTrackers(); err != nil || n != 0 {
+		t.Errorf("clear on empty store: n=%d err=%v, want 0/nil", n, err)
 	}
 }

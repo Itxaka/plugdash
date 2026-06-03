@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"plugdash/internal/store"
 )
 
 const validYAML = `
@@ -153,4 +155,61 @@ func TestLoadMissing(t *testing.T) {
 	if _, err := Load(path); err == nil {
 		t.Error("Load(missing) = nil error, want error")
 	}
+}
+
+func TestMarshalRoundTrip(t *testing.T) {
+	trackers := []*store.Tracker{
+		{ID: 1, PluginID: "github-releases", Name: "K8s", ConfigKey: "k8s", RefreshIntervalSeconds: 600,
+			Config: map[string]any{"repo": "kubernetes/kubernetes"}},
+		// No ConfigKey: key derived from the name.
+		{ID: 2, PluginID: "http-health", Name: "Prod API", Config: map[string]any{"url": "https://x"}},
+		// Same name as #2 → slug collision, deduped with the id suffix.
+		{ID: 3, PluginID: "http-health", Name: "Prod API", Config: map[string]any{"url": "https://y"}},
+	}
+
+	out, err := Marshal(trackers)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	// A dump must never carry settings/secrets.
+	if got := string(out); containsStr(got, "settings") || containsStr(got, "github_token") {
+		t.Errorf("dump leaked settings/secrets:\n%s", got)
+	}
+
+	c, err := Parse(out)
+	if err != nil {
+		t.Fatalf("re-parse dumped config: %v\n%s", err, out)
+	}
+	if len(c.Trackers) != 3 {
+		t.Fatalf("round-trip tracker count = %d, want 3", len(c.Trackers))
+	}
+
+	keys := map[string]bool{}
+	for _, tr := range c.Trackers {
+		if keys[tr.Key] {
+			t.Errorf("duplicate key in dump: %q", tr.Key)
+		}
+		keys[tr.Key] = true
+	}
+	if c.Trackers[0].Key != "k8s" || c.Trackers[0].Plugin != "github-releases" {
+		t.Errorf("first tracker = %+v, want key=k8s plugin=github-releases", c.Trackers[0])
+	}
+	if c.Trackers[0].RefreshIntervalSeconds != 600 {
+		t.Errorf("refresh interval lost: %d", c.Trackers[0].RefreshIntervalSeconds)
+	}
+	if c.Trackers[1].Key != "prod-api" {
+		t.Errorf("derived key = %q, want prod-api", c.Trackers[1].Key)
+	}
+	if c.Trackers[2].Key != "prod-api-3" {
+		t.Errorf("collision key = %q, want prod-api-3", c.Trackers[2].Key)
+	}
+}
+
+func containsStr(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }

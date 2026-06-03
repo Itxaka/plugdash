@@ -254,6 +254,22 @@ func (s *Store) DeleteTracker(id int64) error {
 	return nil
 }
 
+// ClearTrackers deletes every tracker (db- and file-sourced alike) and returns
+// how many rows were removed. Snapshots are dropped by the foreign-key cascade.
+// The on-disk config file (if any) is untouched, so a reload or restart restores
+// the file-managed trackers.
+func (s *Store) ClearTrackers() (int, error) {
+	res, err := s.db.Exec(`DELETE FROM trackers`)
+	if err != nil {
+		return 0, fmt.Errorf("clear trackers: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
 // ReconcileFileTrackers makes the set of source="file" trackers match items
 // exactly: file trackers present in items are upserted by their ConfigKey
 // (updating in place so IDs and dashboard order survive), and file trackers no
@@ -297,10 +313,7 @@ func (s *Store) ReconcileFileTrackers(items []FileTracker) error {
 		if err != nil {
 			return fmt.Errorf("marshal config for %q: %w", it.Key, err)
 		}
-		interval := it.RefreshIntervalSeconds
-		if interval < 0 {
-			interval = 0
-		}
+		interval := max(it.RefreshIntervalSeconds, 0)
 		seen[it.Key] = true
 		if id, ok := existing[it.Key]; ok {
 			if _, err := tx.Exec(

@@ -1268,6 +1268,52 @@ pre.viz-raw {
   word-break: break-word;
 }
 
+/* ---------- Trackers bulk-action bar ---------- */
+.tracker-actions-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.tracker-actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The dump button is an <a> styled as a button: kill the link defaults. */
+.tracker-actions-row a.btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.import-paste {
+  width: 100%;
+  min-height: 120px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  resize: vertical;
+}
+
+.import-paste:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 /* ---------- Configure view ---------- */
 .config-layout {
   display: grid;

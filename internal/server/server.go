@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"plugdash/internal/config"
 	"plugdash/internal/engine"
 	"plugdash/internal/plugin"
 	"plugdash/internal/store"
@@ -46,7 +47,14 @@ type Server struct {
 	logs      *LogRing
 	level     *slog.LevelVar
 	engine    *engine.Engine // when set, runs are server-driven + cached
+	// configPath is the declarative --config file the server was started with
+	// (empty if none). It backs POST /api/trackers/reload, which re-reads it.
+	configPath string
 }
+
+// SetConfigPath records the declarative config file path so /api/trackers/reload
+// can re-reconcile from it and /api/config can report it. Empty disables reload.
+func (s *Server) SetConfigPath(path string) { s.configPath = path }
 
 // SetEngine wires the server-side run engine. When set, /api/run and
 // /api/trackers/{id}/run serve cached snapshots and /api/stream pushes live
@@ -110,6 +118,11 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/trackers", s.handleCreateTracker)
 	s.mux.HandleFunc("PUT /api/trackers/{id}", s.handleUpdateTracker)
 	s.mux.HandleFunc("DELETE /api/trackers/{id}", s.handleDeleteTracker)
+	s.mux.HandleFunc("POST /api/trackers/clear", s.handleClearTrackers)
+	s.mux.HandleFunc("POST /api/trackers/reload", s.handleReloadTrackers)
+	s.mux.HandleFunc("POST /api/trackers/import", s.handleImportTrackers)
+	s.mux.HandleFunc("GET /api/trackers/export", s.handleExportTrackers)
+	s.mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	s.mux.HandleFunc("GET /api/trackers/{id}/run", s.handleRunTracker)
 	s.mux.HandleFunc("GET /api/run", s.handleRunAll)
 	s.mux.HandleFunc("GET /api/stream", s.handleStream)
@@ -318,10 +331,10 @@ func (s *Server) handleDeleteTracker(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if existing, gerr := s.store.GetTracker(id); gerr == nil && existing.Source == store.SourceFile {
-		writeError(w, http.StatusForbidden, "tracker is managed by config and cannot be deleted from the UI")
-		return
-	}
+	// File-managed trackers are deletable (Clear and the "reload from file" flow
+	// rely on this); only editing them stays blocked, since a reload would just
+	// overwrite an edit. The on-disk config is untouched, so reload/restart
+	// restores anything removed here.
 	if err := s.store.DeleteTracker(id); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "tracker not found")
@@ -332,6 +345,96 @@ func (s *Server) handleDeleteTracker(w http.ResponseWriter, r *http.Request) {
 	}
 	s.reconcileEngine()
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// maxImportBytes caps the size of an uploaded/pasted config to keep a hostile
+// or accidental large body from exhausting memory.
+const maxImportBytes = 1 << 20 // 1 MiB
+
+// handleClearTrackers deletes every tracker (db and file alike). The on-disk
+// config is left untouched, so a reload or restart restores file trackers.
+func (s *Server) handleClearTrackers(w http.ResponseWriter, r *http.Request) {
+	n, err := s.store.ClearTrackers()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.reconcileEngine()
+	s.logger.Info("trackers cleared", "count", n)
+	writeJSON(w, http.StatusOK, map[string]any{"cleared": n})
+}
+
+// handleReloadTrackers re-reads the declarative --config file from disk and
+// reconciles its trackers (idempotent: dedup by key, no duplicates). It is a
+// no-op-safe way to restore file trackers after they were cleared or removed.
+func (s *Server) handleReloadTrackers(w http.ResponseWriter, r *http.Request) {
+	if s.configPath == "" {
+		writeError(w, http.StatusConflict, "no config file configured (start plugdash with --config to enable reload)")
+		return
+	}
+	c, err := config.Load(s.configPath)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.store.ReconcileFileTrackers(c.FileTrackers()); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.reconcileEngine()
+	s.logger.Info("trackers reloaded from config", "path", s.configPath, "count", len(c.Trackers))
+	writeJSON(w, http.StatusOK, map[string]any{"trackers": len(c.Trackers)})
+}
+
+// handleImportTrackers loads trackers from a config document supplied in the
+// request body (uploaded file or pasted text). They are reconciled as
+// file-sourced trackers, so they are session-only: a restart's startup reconcile
+// (against the original --config, or nothing) reverts them.
+func (s *Server) handleImportTrackers(w http.ResponseWriter, r *http.Request) {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, maxImportBytes))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "could not read body")
+		return
+	}
+	c, err := config.Parse(raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.store.ReconcileFileTrackers(c.FileTrackers()); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.reconcileEngine()
+	s.logger.Info("trackers imported", "count", len(c.Trackers))
+	writeJSON(w, http.StatusOK, map[string]any{"loaded": len(c.Trackers)})
+}
+
+// handleExportTrackers serializes the current trackers as a downloadable config
+// YAML (trackers only — no settings, so secrets never leave in a dump).
+func (s *Server) handleExportTrackers(w http.ResponseWriter, r *http.Request) {
+	trackers, err := s.store.ListTrackers()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	out, err := config.Marshal(trackers)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-yaml")
+	w.Header().Set("Content-Disposition", `attachment; filename="plugdash-trackers.yaml"`)
+	_, _ = w.Write(out)
+}
+
+// handleGetConfig reports whether a declarative config file is configured, so
+// the UI can enable or disable the "reload from file" action.
+func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"configured": s.configPath != "",
+		"path":       s.configPath,
+	})
 }
 
 // runResponse carries either a plugin Result or an error string for a single
