@@ -59,7 +59,6 @@ plugdash Settings UI is exported into `GITHUB_TOKEN` at startup (see
 | `github-workflow-health` | timeseries | 30m | CI success rate + run-duration trend for a workflow |
 | `github-review-requested` | list | 10m | Open PRs awaiting your review |
 | `github-stale` | list | 1h | Open issues/PRs with no activity for > N days |
-| `github-dependabot` | list | 1h | Open Dependabot security alerts for a repo |
 | `file-version` | stat | 1h | Value of a variable in a file on a repo branch (e.g. a pinned dependency) |
 
 ---
@@ -613,6 +612,8 @@ are excluded.
 
 Open pull requests waiting for your review, via the GitHub search API.
 
+![Review Requested widget](images/plugins/github-review-requested.png)
+
 **Default refresh interval:** 10m
 
 | Key | Label | Type | Required | Default | Notes |
@@ -622,7 +623,7 @@ Open pull requests waiting for your review, via the GitHub search API.
 | `count` | Number of PRs | number | no | 20 | Max PRs to show |
 | `token` | GitHub token (optional) | string | no | — | Falls back to `GITHUB_TOKEN`; required when `login` is empty |
 
-Each row links to the PR with a `review requested` badge and the repo owner's
+Each row links to the PR and shows the repo, number, author and the repo owner's
 avatar.
 
 ---
@@ -644,24 +645,6 @@ Open issues/PRs with no activity for more than N days, across repos (search API)
 | `token` | GitHub token (optional) | string | no | — | Falls back to `GITHUB_TOKEN` |
 
 Most-stale (oldest-updated) first; each row shows a `stale Nd` badge.
-
----
-
-## Dependabot Alerts — `github-dependabot` (visualization: `list`)
-
-Open Dependabot security alerts for a repository.
-
-**Default refresh interval:** 1h
-
-| Key | Label | Type | Required | Default | Notes |
-|-----|-------|------|----------|---------|-------|
-| `repo` | Repository | string | yes | — | `owner/repo` |
-| `count` | Number of alerts | number | no | 20 | Max alerts to show |
-| `token` | GitHub token (optional) | string | no | — | Needs security-events / repo read access; falls back to `GITHUB_TOKEN` |
-
-Each alert row links to its advisory with a severity-toned badge (critical/high →
-red, medium → amber, low → neutral); the badge prefers the CVE id. No open alerts
-renders a single green `clean` row. A `403`/`404` (no access) surfaces as an error.
 
 ---
 

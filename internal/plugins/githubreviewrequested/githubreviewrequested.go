@@ -60,14 +60,13 @@ func (p *Plugin) ConfigSchema() []plugin.ConfigField {
 	}
 }
 
-// listItem matches the frontend "list" visualization shape (multi-badge form).
+// listItem matches the frontend "list" visualization shape.
 type listItem struct {
-	Title     string          `json:"title"`
-	Subtitle  string          `json:"subtitle"`
-	URL       string          `json:"url"`
-	Timestamp string          `json:"timestamp"`
-	Icon      string          `json:"icon,omitempty"`
-	Badges    []plugins.Badge `json:"badges,omitempty"`
+	Title     string `json:"title"`
+	Subtitle  string `json:"subtitle"`
+	URL       string `json:"url"`
+	Timestamp string `json:"timestamp"`
+	Icon      string `json:"icon,omitempty"`
 }
 
 // searchResp is the subset of the search/issues response this plugin consumes.
@@ -141,7 +140,6 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 			URL:       pr.HTMLURL,
 			Timestamp: ts,
 			Icon:      plugins.OwnerAvatarURL(owner),
-			Badges:    []plugins.Badge{{Label: "review requested", Tone: "warn"}},
 		})
 	}
 

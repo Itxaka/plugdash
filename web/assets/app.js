@@ -760,7 +760,6 @@ function iconFor(pluginId) {
     "github-workflow-health": { g: "💚", c: "#3fb950" },
     "github-review-requested": { g: "👀", c: "#e3b341" },
     "github-stale": { g: "🕸️", c: "#8b949e" },
-    "github-dependabot": { g: "🤖", c: "#e5534b" },
     "file-version": { g: "📄", c: "#8b949e" },
     "http-health": { g: "🌐", c: "#39c5cf" },
     "rss-feed": { g: "📡", c: "#f0883e" },
@@ -788,7 +787,6 @@ const ICON_SVG = {
   "github-workflow-health": '<path d="M3 12h4l2-5 4 12 2-7h6"/>',
   "github-review-requested": '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
   "github-stale": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  "github-dependabot": '<rect x="5" y="8" width="14" height="11" rx="2"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1" fill="currentColor" stroke="none"/><circle cx="9.5" cy="13" r="1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="13" r="1" fill="currentColor" stroke="none"/>',
 
   "file-version": '<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/>',
   "http-health": '<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a14 14 0 010 18 14 14 0 010-18"/>',

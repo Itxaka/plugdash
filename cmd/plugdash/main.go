@@ -20,7 +20,6 @@ import (
 	"plugdash/internal/plugins/fileversion"
 	"plugdash/internal/plugins/githubactions"
 	"plugdash/internal/plugins/githubartifacts"
-	"plugdash/internal/plugins/githubdependabot"
 	"plugdash/internal/plugins/githubissues"
 	"plugdash/internal/plugins/githubissuewatch"
 	"plugdash/internal/plugins/githubmilestone"
@@ -142,7 +141,6 @@ func main() {
 	reg.Register(githubworkflow.New())
 	reg.Register(githubreviewrequested.New())
 	reg.Register(githubstale.New())
-	reg.Register(githubdependabot.New())
 	reg.Register(fileversion.New())
 
 	srv := server.New(reg, st, web.FS())

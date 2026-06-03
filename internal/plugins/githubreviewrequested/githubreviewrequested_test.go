@@ -27,15 +27,6 @@ func decodeItems(t *testing.T, res plugin.Result) []listItem {
 	return wrap.Items
 }
 
-func hasBadge(it listItem, label string) bool {
-	for _, b := range it.Badges {
-		if b.Label == label {
-			return true
-		}
-	}
-	return false
-}
-
 // searchItems is the canonical two-PR search response used by the stubs.
 const searchItems = `{"total_count":2,"items":[
 	{"number":1,"title":"Add feature","html_url":"https://github.com/o/r/pull/1",
@@ -85,9 +76,6 @@ func TestExplicitLogin(t *testing.T) {
 	}
 	if !strings.Contains(items[0].Subtitle, "o/r#1") {
 		t.Errorf("subtitle = %q, want it to contain o/r#1", items[0].Subtitle)
-	}
-	if !hasBadge(items[0], "review requested") {
-		t.Errorf("missing 'review requested' badge: %+v", items[0].Badges)
 	}
 }
 
