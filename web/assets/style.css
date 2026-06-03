@@ -66,16 +66,15 @@ html[data-theme="light"] {
   box-sizing: border-box;
 }
 
-/* Text size — a per-browser display preference (like the theme). Scales the
-   whole UI proportionally via zoom; default (no attribute) is 1. */
+/* Text size — a per-browser display preference (like the theme). It scales the
+   text/content *inside* a widget (via zoom on .card-body, below) while the tile
+   keeps its size, so "small" packs more info per card and "large" is easier to
+   read. Default (no attribute) is 1. */
 html[data-font-scale="small"] {
-  --ui-scale: 0.9;
+  --ui-scale: 0.82;
 }
 html[data-font-scale="large"] {
-  --ui-scale: 1.12;
-}
-body {
-  zoom: var(--ui-scale, 1);
+  --ui-scale: 1.2;
 }
 
 html,
@@ -964,6 +963,9 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  /* The text-size preference scales widget content here, not the tile, so a
+     smaller setting fits more rows and a larger one reads easier. */
+  zoom: var(--ui-scale, 1);
 }
 
 .card.is-loading {

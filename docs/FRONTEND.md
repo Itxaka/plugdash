@@ -330,8 +330,10 @@ A per-browser display preference, like the theme. The Settings view offers
 **Small / Normal / Large**; `applyFontScale` sets `html[data-font-scale]` and
 saves it to `localStorage` (`plugdash:fontscale`), and the inline pre-paint
 script in `index.html` re-applies it before first paint to avoid a flash. CSS
-maps the attribute to a `--ui-scale` and scales the whole UI via `body { zoom }`.
-It is client-only — not part of the server-side settings.
+maps the attribute to a `--ui-scale` and scales **widget content** via
+`.card-body { zoom: var(--ui-scale) }` — the tile keeps its size, so Small packs
+more info per card and Large is easier to read. It is client-only — not part of
+the server-side settings.
 
 ## Edit mode
 

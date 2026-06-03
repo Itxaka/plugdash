@@ -1831,7 +1831,7 @@ async function renderSettings() {
       fontSel,
       el("div", {
         class: "help",
-        text: "Scales the whole dashboard. Saved in this browser (like the theme), applied instantly.",
+        text: "Scales the text inside widgets — Small fits more per card, Large is easier to read. Saved in this browser, applied instantly.",
       }),
     ])
   );
