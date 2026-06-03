@@ -623,6 +623,72 @@ body {
   color: var(--text-dim);
 }
 
+/* ---------- gauge (progress) ---------- */
+.viz-gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.gauge-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.gauge-pct {
+  font-size: 34px;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--text);
+}
+.gauge-pct.ok {
+  color: var(--green);
+}
+.gauge-pct.warn {
+  color: var(--yellow);
+}
+.gauge-pct.error {
+  color: var(--red);
+}
+
+.gauge-label {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.gauge-track {
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+
+.gauge-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+.gauge-fill.ok {
+  background: var(--green);
+}
+.gauge-fill.warn {
+  background: var(--yellow);
+}
+.gauge-fill.error {
+  background: var(--red);
+}
+
+.gauge-foot {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
 /* ---------- per-job link pills (checklist) ---------- */
 .jobs-toggle {
   appearance: none;

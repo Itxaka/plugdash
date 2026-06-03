@@ -241,6 +241,8 @@ function renderViz(visualization, data) {
       return renderStat(data);
     case "timeseries":
       return renderTimeseries(data);
+    case "gauge":
+      return renderGauge(data);
     default:
       return renderRaw(data);
   }
@@ -539,6 +541,34 @@ function renderTimeseries(data) {
   return wrap;
 }
 
+function renderGauge(data) {
+  const d = data || {};
+  const val = Number(d.value) || 0;
+  const max = Number(d.max) || 0;
+  const pct = max > 0 ? Math.max(0, Math.min(100, (val / max) * 100)) : 0;
+  const status = ["ok", "warn", "error"].includes(d.status) ? d.status : "";
+  const unit = d.unit ? " " + d.unit : "";
+
+  const wrap = el("div", { class: "viz-gauge" });
+  wrap.appendChild(
+    el("div", { class: "gauge-head" }, [
+      el("span", { class: "gauge-pct " + status, text: Math.round(pct) + "%" }),
+      d.label ? el("span", { class: "gauge-label", text: String(d.label) }) : null,
+    ])
+  );
+  const fill = el("div", { class: "gauge-fill " + status });
+  fill.style.width = pct.toFixed(1) + "%";
+  wrap.appendChild(el("div", { class: "gauge-track" }, fill));
+
+  const footParts = [];
+  if (max > 0) footParts.push(val + " / " + max + unit);
+  if (d.detail) footParts.push(String(d.detail));
+  if (footParts.length) {
+    wrap.appendChild(el("div", { class: "gauge-foot", text: footParts.join(" · ") }));
+  }
+  return wrap;
+}
+
 function renderRaw(data) {
   let text;
   try {
@@ -725,6 +755,12 @@ function iconFor(pluginId) {
     "github-prs": { g: "🔀", c: "#6cb6ff" },
     "endoflife": { g: "⏳", c: "#e3b341" },
     "osv-vulns": { g: "🛡️", c: "#e5534b" },
+    "dependency-freshness": { g: "📦", c: "#3fb950" },
+    "github-milestone": { g: "🎯", c: "#a371f7" },
+    "github-workflow-health": { g: "💚", c: "#3fb950" },
+    "github-review-requested": { g: "👀", c: "#e3b341" },
+    "github-stale": { g: "🕸️", c: "#8b949e" },
+    "github-dependabot": { g: "🤖", c: "#e5534b" },
     "file-version": { g: "📄", c: "#8b949e" },
     "http-health": { g: "🌐", c: "#39c5cf" },
     "rss-feed": { g: "📡", c: "#f0883e" },
@@ -747,6 +783,12 @@ const ICON_SVG = {
   "github-prs": '<circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="18" r="2.2"/><path d="M6 8.2v7.6"/><path d="M18 15.8V12a4 4 0 00-4-4h-3"/><path d="M13 5l-2 3 2 3"/>',
   "endoflife": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   "osv-vulns": '<path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  "dependency-freshness": '<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>',
+  "github-milestone": '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>',
+  "github-workflow-health": '<path d="M3 12h4l2-5 4 12 2-7h6"/>',
+  "github-review-requested": '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+  "github-stale": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  "github-dependabot": '<rect x="5" y="8" width="14" height="11" rx="2"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1" fill="currentColor" stroke="none"/><circle cx="9.5" cy="13" r="1" fill="currentColor" stroke="none"/><circle cx="14.5" cy="13" r="1" fill="currentColor" stroke="none"/>',
 
   "file-version": '<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/>',
   "http-health": '<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a14 14 0 010 18 14 14 0 010-18"/>',

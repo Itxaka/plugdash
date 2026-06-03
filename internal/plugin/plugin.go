@@ -64,6 +64,10 @@ const (
 	// Points must be in ascending time order. Used for "value over time" widgets
 	// (e.g. stars history) computed just-in-time from timestamped source data.
 	VizTimeseries Visualization = "timeseries"
+	// VizGauge renders Data as a progress bar with a percentage:
+	// {label, value: number, max: number, unit?, status?: "ok"|"warn"|"error", detail?}.
+	// Used for completion/utilization widgets (e.g. milestone progress).
+	VizGauge Visualization = "gauge"
 )
 
 // Result is what a plugin returns from Run. Data must be JSON-serializable and

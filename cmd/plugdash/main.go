@@ -14,18 +14,24 @@ import (
 	"plugdash/internal/engine"
 	"plugdash/internal/extplugin"
 	"plugdash/internal/plugin"
+	"plugdash/internal/plugins/depfreshness"
 	"plugdash/internal/plugins/dockerimage"
 	"plugdash/internal/plugins/eol"
 	"plugdash/internal/plugins/fileversion"
 	"plugdash/internal/plugins/githubactions"
 	"plugdash/internal/plugins/githubartifacts"
+	"plugdash/internal/plugins/githubdependabot"
 	"plugdash/internal/plugins/githubissues"
 	"plugdash/internal/plugins/githubissuewatch"
+	"plugdash/internal/plugins/githubmilestone"
 	"plugdash/internal/plugins/githubprs"
 	"plugdash/internal/plugins/githubrate"
 	"plugdash/internal/plugins/githubreleases"
 	"plugdash/internal/plugins/githubrepostats"
+	"plugdash/internal/plugins/githubreviewrequested"
+	"plugdash/internal/plugins/githubstale"
 	"plugdash/internal/plugins/githubstars"
+	"plugdash/internal/plugins/githubworkflow"
 	"plugdash/internal/plugins/httphealth"
 	"plugdash/internal/plugins/osvvulns"
 	"plugdash/internal/plugins/rssfeed"
@@ -131,6 +137,12 @@ func main() {
 	reg.Register(githubprs.New())
 	reg.Register(eol.New())
 	reg.Register(osvvulns.New())
+	reg.Register(depfreshness.New())
+	reg.Register(githubmilestone.New())
+	reg.Register(githubworkflow.New())
+	reg.Register(githubreviewrequested.New())
+	reg.Register(githubstale.New())
+	reg.Register(githubdependabot.New())
 	reg.Register(fileversion.New())
 
 	srv := server.New(reg, st, web.FS())
