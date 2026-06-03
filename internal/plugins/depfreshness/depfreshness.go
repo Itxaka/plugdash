@@ -48,6 +48,9 @@ func (p *Plugin) Description() string {
 // RefreshInterval defaults to daily: dependency releases move slowly.
 func (p *Plugin) RefreshInterval() time.Duration { return 24 * time.Hour }
 
+// PreferredSize requests a double-width tile: module paths are long.
+func (p *Plugin) PreferredSize() plugin.Size { return plugin.Size{Width: 2, Height: 1} }
+
 func (p *Plugin) ConfigSchema() []plugin.ConfigField {
 	return []plugin.ConfigField{
 		{

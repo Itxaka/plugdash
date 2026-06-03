@@ -278,7 +278,8 @@ A widget can request a larger footprint. `/api/plugins` reports each plugin's
 external plugin's `describe` `width`/`height`). On the dashboard,
 `applyCardSize(root, size, uniform)` maps that to `grid-column: span 2` (wide) /
 `grid-row: span 2` (tall). For example `github-prs` and `github-review-requested`
-are 2×1 (long titles), `github-actions-status` is 1×2 (many repos):
+and `dependency-freshness` are 2×1 (long titles / module paths),
+`github-actions-status` is 1×2 (many repos):
 
 ![Widgets at different sizes](images/sizes.png)
 
