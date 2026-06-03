@@ -612,7 +612,7 @@ are excluded.
 
 ## Review Requested — `github-review-requested` (visualization: `list`)
 
-Open pull requests waiting for your review, via the GitHub search API.
+Open, non-draft pull requests waiting for your review, via the GitHub search API.
 
 ![Review Requested widget](images/plugins/github-review-requested.png)
 

@@ -109,9 +109,9 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 		login = who.Login
 	}
 
-	// Build the search query: open PRs with this login as a requested reviewer,
-	// optionally scoped to specific repos.
-	q := "is:open is:pr review-requested:" + login
+	// Build the search query: open, non-draft PRs with this login as a requested
+	// reviewer, optionally scoped to specific repos. Drafts aren't ready for review.
+	q := "is:open is:pr draft:false review-requested:" + login
 	for _, raw := range cfg.List("repos") {
 		owner, name, err := plugins.NormalizeRepo(raw)
 		if err != nil {
