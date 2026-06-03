@@ -50,22 +50,15 @@ func (p *Plugin) ConfigSchema() []plugin.ConfigField {
 	}
 }
 
-// badge is one colored pill on a list item. Tone drives the pill color in the
-// frontend: ok (green), warn (amber), bad (red), neutral (default).
-type badge struct {
-	Label string `json:"label"`
-	Tone  string `json:"tone"`
-}
-
 // listItem matches the frontend "list" visualization shape, extended with a
 // multi-badge slice (the single-badge form is unused here).
 type listItem struct {
-	Title     string  `json:"title"`
-	Subtitle  string  `json:"subtitle"`
-	URL       string  `json:"url"`
-	Timestamp string  `json:"timestamp"`
-	Icon      string  `json:"icon,omitempty"`
-	Badges    []badge `json:"badges,omitempty"`
+	Title     string          `json:"title"`
+	Subtitle  string          `json:"subtitle"`
+	URL       string          `json:"url"`
+	Timestamp string          `json:"timestamp"`
+	Icon      string          `json:"icon,omitempty"`
+	Badges    []plugins.Badge `json:"badges,omitempty"`
 }
 
 // itemResult pairs the rendered list item with the facts the run needs to
@@ -106,16 +99,6 @@ type ghPull struct {
 	} `json:"head"`
 }
 
-type checkRun struct {
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-}
-
-type checkRunsResp struct {
-	TotalCount int        `json:"total_count"`
-	CheckRuns  []checkRun `json:"check_runs"`
-}
-
 func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, error) {
 	refs := cfg.List("issues")
 	if len(refs) == 0 {
@@ -151,7 +134,7 @@ func evalRef(ctx context.Context, client *plugins.GHClient, ref string) itemResu
 			item: listItem{
 				Title:    ref,
 				Subtitle: err.Error(),
-				Badges:   []badge{{Label: "invalid", Tone: "bad"}},
+				Badges:   []plugins.Badge{{Label: "invalid", Tone: "bad"}},
 			},
 		}
 	}
@@ -169,7 +152,7 @@ func evalRef(ctx context.Context, client *plugins.GHClient, ref string) itemResu
 				Subtitle: "error: " + err.Error(),
 				URL:      fallbackURL,
 				Icon:     icon,
-				Badges:   []badge{{Label: "error", Tone: "bad"}},
+				Badges:   []plugins.Badge{{Label: "error", Tone: "bad"}},
 			},
 		}
 	}
@@ -198,11 +181,11 @@ func evalRef(ctx context.Context, client *plugins.GHClient, ref string) itemResu
 		}
 	}
 
-	badges := make([]badge, 0, 2)
+	badges := make([]plugins.Badge, 0, 2)
 	if answered {
-		badges = append(badges, badge{Label: "answered", Tone: "ok"})
+		badges = append(badges, plugins.Badge{Label: "answered", Tone: "ok"})
 	} else {
-		badges = append(badges, badge{Label: "no reply", Tone: "warn"})
+		badges = append(badges, plugins.Badge{Label: "no reply", Tone: "warn"})
 	}
 
 	state := iss.State // open / closed
@@ -215,10 +198,8 @@ func evalRef(ctx context.Context, client *plugins.GHClient, ref string) itemResu
 				state = "merged"
 			}
 			if pull.Head.SHA != "" {
-				var runs checkRunsResp
-				if err := client.Get(ctx, fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs", owner, repo, pull.Head.SHA), &runs); err == nil {
-					l, tone := ciBadge(runs)
-					badges = append(badges, badge{Label: l, Tone: tone})
+				if ci, ok := client.CIBadge(ctx, owner, repo, pull.Head.SHA); ok {
+					badges = append(badges, ci)
 				}
 			}
 		}
@@ -239,31 +220,6 @@ func evalRef(ctx context.Context, client *plugins.GHClient, ref string) itemResu
 			Badges:    badges,
 		},
 	}
-}
-
-// ciBadge aggregates check runs into a single CI badge label + tone, using the
-// same conclusion semantics as the github-actions plugin.
-func ciBadge(runs checkRunsResp) (string, string) {
-	if runs.TotalCount == 0 {
-		return "CI: no checks", "neutral"
-	}
-	failed := map[string]bool{
-		"failure":         true,
-		"timed_out":       true,
-		"cancelled":       true,
-		"action_required": true,
-	}
-	for _, r := range runs.CheckRuns {
-		if failed[r.Conclusion] {
-			return "CI: failing", "bad"
-		}
-	}
-	for _, r := range runs.CheckRuns {
-		if r.Status != "completed" {
-			return "CI: running", "neutral"
-		}
-	}
-	return "CI: passing", "ok"
 }
 
 // parseRef parses a tracked-item reference into owner, repo and number. It

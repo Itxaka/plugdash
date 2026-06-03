@@ -11,6 +11,25 @@ import (
 	"time"
 )
 
+func TestAggregateCIBadge(t *testing.T) {
+	cases := []struct {
+		runs      CheckRunsResp
+		wantLabel string
+		wantTone  string
+	}{
+		{CheckRunsResp{TotalCount: 0}, "CI: no checks", "neutral"},
+		{CheckRunsResp{TotalCount: 1, CheckRuns: []CheckRun{{Status: "completed", Conclusion: "success"}}}, "CI: passing", "ok"},
+		{CheckRunsResp{TotalCount: 1, CheckRuns: []CheckRun{{Status: "in_progress"}}}, "CI: running", "neutral"},
+		{CheckRunsResp{TotalCount: 2, CheckRuns: []CheckRun{{Status: "completed", Conclusion: "success"}, {Status: "completed", Conclusion: "failure"}}}, "CI: failing", "bad"},
+	}
+	for _, c := range cases {
+		b := AggregateCIBadge(c.runs)
+		if b.Label != c.wantLabel || b.Tone != c.wantTone {
+			t.Errorf("AggregateCIBadge(%+v) = %+v, want {%q,%q}", c.runs, b, c.wantLabel, c.wantTone)
+		}
+	}
+}
+
 func TestNormalizeRepo(t *testing.T) {
 	valid := []struct {
 		in    string

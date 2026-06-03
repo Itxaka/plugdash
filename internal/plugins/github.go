@@ -168,6 +168,60 @@ func OwnerAvatarURL(owner string) string {
 	return "https://github.com/" + owner + ".png?size=64"
 }
 
+// Badge is one tone-colored pill on a list item, shared by the issue/PR widgets.
+// Tone is one of ok | warn | bad | neutral (the frontend maps it to a color).
+type Badge struct {
+	Label string `json:"label"`
+	Tone  string `json:"tone"`
+}
+
+// CheckRun and CheckRunsResp model the GitHub check-runs API.
+type CheckRun struct {
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
+type CheckRunsResp struct {
+	TotalCount int        `json:"total_count"`
+	CheckRuns  []CheckRun `json:"check_runs"`
+}
+
+// AggregateCIBadge collapses a commit's check runs into a single CI badge:
+// failing if any run concluded in a failure-like state, running if any is not
+// completed, passing if all completed cleanly, or "no checks" when there are none.
+func AggregateCIBadge(runs CheckRunsResp) Badge {
+	if runs.TotalCount == 0 {
+		return Badge{Label: "CI: no checks", Tone: "neutral"}
+	}
+	failed := map[string]bool{
+		"failure":         true,
+		"timed_out":       true,
+		"cancelled":       true,
+		"action_required": true,
+	}
+	for _, r := range runs.CheckRuns {
+		if failed[r.Conclusion] {
+			return Badge{Label: "CI: failing", Tone: "bad"}
+		}
+	}
+	for _, r := range runs.CheckRuns {
+		if r.Status != "completed" {
+			return Badge{Label: "CI: running", Tone: "neutral"}
+		}
+	}
+	return Badge{Label: "CI: passing", Tone: "ok"}
+}
+
+// CIBadge fetches a commit's check runs and returns the aggregated CI badge.
+// ok is false when the request failed (the caller omits the badge).
+func (c *GHClient) CIBadge(ctx context.Context, owner, repo, sha string) (Badge, bool) {
+	var runs CheckRunsResp
+	if err := c.Get(ctx, fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs", owner, repo, sha), &runs); err != nil {
+		return Badge{}, false
+	}
+	return AggregateCIBadge(runs), true
+}
+
 // NormalizeRepo accepts "owner/repo" or a full GitHub URL and returns
 // owner, repo. It returns an error if the shape is unrecognized.
 func NormalizeRepo(s string) (owner, repo string, err error) {

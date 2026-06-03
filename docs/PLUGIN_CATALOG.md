@@ -51,6 +51,7 @@ plugdash Settings UI is exported into `GITHUB_TOKEN` at startup (see
 | `github-activity-rate` | timeseries | 6h | Per-period counts of stars/commits/issues/PRs |
 | `github-issues` | list | 15m | Latest open issues needing a first reply across repos |
 | `github-issue-watch` | list | 15m | Specific issues/PRs: answered state, time since last reply, CI status |
+| `github-prs` | list | 5m | Open PRs across repos with review state, CI status and draft flag |
 | `file-version` | stat | 1h | Value of a variable in a file on a repo branch (e.g. a pinned dependency) |
 
 ---
@@ -411,6 +412,47 @@ interaction**, and — for pull requests — its **CI status**.
   "name": "My watched issues",
   "config": {
     "issues": "kairos-io/kairos#1234\nhttps://github.com/kairos-io/kairos/pull/56"
+  }
+}
+```
+
+---
+
+## Pull Requests — `github-prs` (visualization: `list`)
+
+A review queue: open pull requests across one or more repositories, each row
+showing the **review state**, **CI status**, and a **draft** flag.
+
+**Default refresh interval:** 5m
+
+| Key | Label | Type | Required | Default | Notes |
+|-----|-------|------|----------|---------|-------|
+| `repos` | Repositories | list | yes | — | One `owner/repo` per line |
+| `author` | Author filter | string | no | — | Only PRs opened by this login |
+| `reviewer` | Review-requested-of filter | string | no | — | Only PRs where this login is a requested reviewer |
+| `count` | Number of PRs | number | no | 20 | Max PRs shown in total (across all repos) |
+| `token` | GitHub token (optional) | string | no | — | Raises rate limits; falls back to `GITHUB_TOKEN` |
+
+**Behaviors:**
+
+- Open PRs are listed per repo (sorted/most-recently-updated), filtered by the
+  optional `author` / `reviewer`, combined, sorted newest-updated across all
+  repos, and trimmed to `count`. The row timestamp ages the last-update live.
+- **Review badge** (aggregated from the PR's reviews, latest decisive review per
+  reviewer): `changes requested` (red) wins, else `approved` (green), else
+  `review pending` (amber).
+- **CI badge** from the head commit's check runs: `CI: passing/failing/running/no
+  checks` (shared with `github-issue-watch`).
+- Draft PRs get a `draft` badge. A bad repo or a per-repo fetch error renders as
+  an `error` row rather than failing the whole run.
+
+```json
+{
+  "plugin_id": "github-prs",
+  "name": "Team review queue",
+  "config": {
+    "repos": "kairos-io/kairos\nkairos-io/immucore",
+    "reviewer": "octocat"
   }
 }
 ```

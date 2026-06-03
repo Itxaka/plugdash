@@ -20,6 +20,7 @@ import (
 	"plugdash/internal/plugins/githubartifacts"
 	"plugdash/internal/plugins/githubissues"
 	"plugdash/internal/plugins/githubissuewatch"
+	"plugdash/internal/plugins/githubprs"
 	"plugdash/internal/plugins/githubrate"
 	"plugdash/internal/plugins/githubreleases"
 	"plugdash/internal/plugins/githubrepostats"
@@ -125,6 +126,7 @@ func main() {
 	reg.Register(githubrate.New())
 	reg.Register(githubissues.New())
 	reg.Register(githubissuewatch.New())
+	reg.Register(githubprs.New())
 	reg.Register(fileversion.New())
 
 	srv := server.New(reg, st, web.FS())

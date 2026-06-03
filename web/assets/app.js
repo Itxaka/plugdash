@@ -722,6 +722,7 @@ function iconFor(pluginId) {
     "github-activity-rate": { g: "📊", c: "#db61a2" },
     "github-issues": { g: "🐛", c: "#e5534b" },
     "github-issue-watch": { g: "👁️", c: "#bc8cff" },
+    "github-prs": { g: "🔀", c: "#6cb6ff" },
     "file-version": { g: "📄", c: "#8b949e" },
     "http-health": { g: "🌐", c: "#39c5cf" },
     "rss-feed": { g: "📡", c: "#f0883e" },
@@ -741,6 +742,8 @@ const ICON_SVG = {
   "github-activity-rate": '<line x1="6" y1="20" x2="6" y2="13"/><line x1="12" y1="20" x2="12" y2="6"/><line x1="18" y1="20" x2="18" y2="10"/>',
   "github-issues": '<circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><circle cx="12" cy="16.3" r="0.7" fill="currentColor" stroke="none"/>',
   "github-issue-watch": '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+  "github-prs": '<circle cx="6" cy="6" r="2.2"/><circle cx="6" cy="18" r="2.2"/><circle cx="18" cy="18" r="2.2"/><path d="M6 8.2v7.6"/><path d="M18 15.8V12a4 4 0 00-4-4h-3"/><path d="M13 5l-2 3 2 3"/>',
+
   "file-version": '<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/>',
   "http-health": '<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a14 14 0 010 18 14 14 0 010-18"/>',
   "rss-feed": '<path d="M5 11a8 8 0 018 8"/><path d="M5 5a14 14 0 0114 14"/><circle cx="6" cy="18" r="1.4" fill="currentColor" stroke="none"/>',

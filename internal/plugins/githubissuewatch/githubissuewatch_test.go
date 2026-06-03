@@ -175,22 +175,3 @@ func TestRunEmpty(t *testing.T) {
 		t.Fatal("expected error for empty issues config")
 	}
 }
-
-func TestCIBadge(t *testing.T) {
-	cases := []struct {
-		runs      checkRunsResp
-		wantLabel string
-		wantTone  string
-	}{
-		{checkRunsResp{TotalCount: 0}, "CI: no checks", "neutral"},
-		{checkRunsResp{TotalCount: 1, CheckRuns: []checkRun{{Status: "completed", Conclusion: "success"}}}, "CI: passing", "ok"},
-		{checkRunsResp{TotalCount: 1, CheckRuns: []checkRun{{Status: "in_progress"}}}, "CI: running", "neutral"},
-		{checkRunsResp{TotalCount: 2, CheckRuns: []checkRun{{Status: "completed", Conclusion: "success"}, {Status: "completed", Conclusion: "failure"}}}, "CI: failing", "bad"},
-	}
-	for _, c := range cases {
-		l, tone := ciBadge(c.runs)
-		if l != c.wantLabel || tone != c.wantTone {
-			t.Errorf("ciBadge(%+v) = (%q,%q), want (%q,%q)", c.runs, l, tone, c.wantLabel, c.wantTone)
-		}
-	}
-}
