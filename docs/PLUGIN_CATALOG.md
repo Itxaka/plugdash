@@ -387,6 +387,8 @@ Watch a specific set of issues and/or pull requests. Each tracked item becomes a
 list row showing whether it has been **answered**, how long since the **last
 interaction**, and — for pull requests — its **CI status**.
 
+![Issue Watcher widget](images/plugins/github-issue-watch.png)
+
 **Default refresh interval:** 15m
 
 | Key | Label | Type | Required | Default | Notes |
@@ -424,6 +426,8 @@ interaction**, and — for pull requests — its **CI status**.
 
 A review queue: open pull requests across one or more repositories, each row
 showing the **review state**, **CI status**, and a **draft** flag.
+
+![Pull Requests widget](images/plugins/github-prs.png)
 
 **Default refresh interval:** 5m
 
@@ -467,6 +471,8 @@ Track end-of-life / support dates for the languages, runtimes, databases and
 operating systems in your stack, via the free [endoflife.date](https://endoflife.date)
 API. No authentication required.
 
+![End-of-Life widget](images/plugins/endoflife.png)
+
 **Default refresh interval:** 24h
 
 | Key | Label | Type | Required | Default | Notes |
@@ -498,6 +504,8 @@ API. No authentication required.
 
 List known vulnerabilities affecting a specific package version, from the free
 [OSV.dev](https://osv.dev) database. No authentication required.
+
+![Vulnerability Check widget](images/plugins/osv-vulns.png)
 
 **Default refresh interval:** 6h
 
