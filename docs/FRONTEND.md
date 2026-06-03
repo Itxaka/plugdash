@@ -242,6 +242,13 @@ structured as head / body / footer:
   (`↻`). The force button is present for **all** trackers, file-managed ones
   included.
 
+  The "updated X ago" label is **live-aging**: each card stores the raw fetch
+  time on the element (`updatedEl.dataset.ts`) and a single page-wide ticker
+  re-renders every label every **30s** (`setInterval(refreshUpdatedLabels,
+  30000)`), so "3m ago" advances to "4m ago" without a new snapshot. Hovering the
+  label shows the **absolute** fetch time (`updatedEl.title = "Data fetched " +
+  new Date(at).toLocaleString()`).
+
 The card also exposes its per-type accent color to CSS:
 `root.style.setProperty("--type", ic.c)` — used for the head tint, hover ring,
 and border (see "status strip" below).

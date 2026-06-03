@@ -311,10 +311,10 @@ startup by **`internal/config`** alongside ad-hoc trackers created in the UI —
 
 ### `internal/plugins/*` — built-in plugins + shared helpers
 
-- One package per plugin, each `New()`-constructed and registered in `main`. Built-in ids include:
-  `github-releases`, `github-release-artifacts`, `github-repo-stats`, `github-actions-status`,
+- One package per plugin, each `New()`-constructed and registered in `main`. The eleven built-in ids
+  are: `github-releases`, `github-release-artifacts`, `github-repo-stats`, `github-actions-status`,
   `github-activity`, `github-activity-rate`, `github-issues`, `http-health`, `rss-feed`,
-  `docker-image`.
+  `docker-image`, `file-version`.
 - **Shared helpers** in the `plugins` package root: `github.go` (`GHClient` — authenticated GitHub
   REST calls, falling back to `GITHUB_TOKEN`), `registry.go` (container image reference validation /
   registry queries), and `ghactivity.go` (paginated activity fetching and the metric options the
@@ -419,7 +419,8 @@ plugdash/
 │       ├── githubissues/    github-issues plugin.
 │       ├── httphealth/      http-health plugin.
 │       ├── rssfeed/         rss-feed plugin.
-│       └── dockerimage/     docker-image plugin.
+│       ├── dockerimage/     docker-image plugin.
+│       └── fileversion/     file-version plugin (value of a variable in a repo file).
 ├── web/
 │   ├── web.go                  go:embed of assets/, exposes web.FS().
 │   └── assets/

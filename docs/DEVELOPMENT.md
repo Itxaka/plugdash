@@ -64,7 +64,10 @@ Useful flags (see `cmd/plugdash/main.go`):
 - `-addr` — HTTP listen address (default `:8080`).
 - `-db` — path to the SQLite database file (default `plugdash.db`).
 - `-plugins-dir` — directory of external plugin executables.
+- `-config` — path to a declarative config file (YAML); trackers in it are
+  reconciled into the DB and shown read-only in the UI.
 - `-debug` — verbose logging (also via `PLUGDASH_DEBUG=1` or the Settings UI).
+- `-version` — print the version and exit.
 
 A GitHub token can be supplied via `GITHUB_TOKEN` or saved in the Settings UI;
 it authenticates all GitHub plugins and raises rate limits.
@@ -241,15 +244,20 @@ Without an entry it falls back to the default puzzle-piece glyph. Remember to
 - **Hash routing.** Views are deep-linkable via `location.hash` (e.g.
   `#dashboard`, `#settings`); the app listens for `hashchange` and renders the
   matching view, honoring the initial hash on load.
-- **localStorage widget cache.** Each widget's last result is cached under
-  `plugdash:w:<id>` with a timestamp and a signature of `(plugin_id, config,
-  refresh_interval)`. On reload the cache is reused while younger than the
-  widget's interval, so a refresh doesn't re-query slow APIs. A config edit
-  changes the signature and invalidates the cache automatically. **When testing
-  frontend changes, clear this cache (or hard-refresh) so you aren't looking at a
-  stale cached render.**
-- **Per-widget refresh timers.** When auto-refresh is enabled, each widget runs on
-  its own cadence (its tracker's interval override, or the plugin's declared
-  `RefreshInterval`) via independent `setInterval` timers. Cheap/volatile widgets
-  poll often; slow ones rarely. A force-refresh button on each widget always
-  re-runs immediately.
+- **Server-driven, live over SSE.** Runs happen on the server (the engine
+  executes each tracker on its cadence and caches one snapshot shared by all
+  clients). The dashboard subscribes to `GET /api/stream` with an `EventSource`
+  while it is the active view — the **Live** toggle controls this — and applies
+  each pushed snapshot to its widget. The browser does **not** keep a
+  localStorage widget cache or per-widget `setInterval` timers; instead, on
+  connect the stream replays the current snapshots so the dashboard paints
+  immediately.
+- **Polling fallback.** If `EventSource` is unavailable or the stream closes, the
+  app falls back to polling the cached `GET /api/run` every 8s
+  (`pollTimer = setInterval(poll, 8000)`), which serves the same snapshots and
+  keeps the engine considered present. A force-refresh button on each widget
+  always re-runs that tracker immediately (`?force=true`).
+- **Live-aging "updated X ago" label.** Each card shows when its data was fetched
+  as a relative label; a single ticker re-renders all the labels every 30s
+  (`setInterval(refreshUpdatedLabels, 30000)`), and hovering shows the absolute
+  fetch time.

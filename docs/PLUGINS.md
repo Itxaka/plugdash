@@ -283,6 +283,8 @@ type ConfigField struct {
 	Placeholder string    `json:"placeholder,omitempty"`
 	Help        string    `json:"help,omitempty"`
 	Default     any       `json:"default,omitempty"`
+	// Options lists the choices for a FieldSelect field; ignored otherwise.
+	Options []SelectOption `json:"options,omitempty"`
 }
 ```
 

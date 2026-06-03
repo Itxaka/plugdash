@@ -1,6 +1,6 @@
 # Plugin Catalog
 
-Reference for every built-in plugin shipped with plugdash. All ten plugins listed
+Reference for every built-in plugin shipped with plugdash. All eleven plugins listed
 here are registered in `cmd/plugdash/main.go`.
 
 ## How to use this reference

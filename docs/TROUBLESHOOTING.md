@@ -143,9 +143,10 @@ it from the same tab.
 **Important:** debug log lines are only emitted on *new* plugin runs. Turning
 debug on does not retroactively add detail to errors that already happened —
 **force-refresh the widget** (its refresh button, or the global **Refresh**)
-to produce a fresh, fully-logged run. Note also that the dashboard caches
-results (see [Data looks stale](#data-looks-stale--f5-doesnt-refresh)), so a
-plain page reload may not re-run the widget at all.
+to produce a fresh, fully-logged run. Note also that the server caches one
+snapshot per tracker and only re-runs on the tracker's cadence (see
+[Data looks stale](#data-looks-stale--f5-doesnt-refresh)), so a plain page reload
+re-paints from the cached snapshot and does not re-run the widget.
 
 ---
 
@@ -208,32 +209,38 @@ These warnings tell you exactly which requirement the plugin failed.
 
 ## Data looks stale / F5 doesn't refresh
 
-**Cause.** This is intentional. Each widget caches its last result in the
-browser's **localStorage**, stamped with a timestamp and a signature of the
-tracker (plugin id + config + interval). On page load, plugdash reuses the
-cached result **as long as it is younger than that widget's own refresh
-interval**. This is what spares the external APIs (GitHub especially) from a
-burst of calls every time you reload the page — pressing **F5** will render
-from cache and not re-fetch while the cache is still fresh.
+**Cause.** This is intentional. Runs happen on the **server**: the engine runs
+each tracker on **its own cadence** and caches **one snapshot per tracker** that
+every client shares. A page reload does not re-run anything — the dashboard just
+re-paints from the current server-side snapshot (replayed over SSE on connect, or
+read from `/api/run`). This is what spares the external APIs (GitHub especially)
+from a burst of calls every time someone reloads: a widget with, say, a 24-hour
+interval keeps showing its last snapshot until the engine re-runs it 24 hours
+later.
 
-The signature matters too: editing a tracker's config or interval changes
-the signature and automatically invalidates its cache, so your next view
-re-runs the widget.
+Snapshots are also **persisted to the database** (a `snapshots` table, one row
+per tracker, overwritten each run — last-known state, *not* history). So after a
+**restart** the dashboard paints instantly from the last-known snapshots, and —
+importantly — a restart does **not** re-trigger checks whose interval hasn't
+elapsed: the engine restores each tracker's last-run time from the persisted
+`fetched_at`, so a redeploy or crash-loop doesn't cause a burst of fresh upstream
+calls.
 
 **How to force a refresh:**
 
-- **One widget:** click that widget's **refresh button** (a forced run that
-  ignores the cache).
-- **Everything:** click the global **Refresh** button ("Refresh all now").
-- **Editing** the tracker's config also invalidates its cache.
+- **One widget:** click that widget's **refresh button** — a forced run
+  (`/api/trackers/{id}/run?force=true`) that ignores the cadence and re-runs the
+  tracker immediately.
+- **Everything:** click the global **Refresh** button ("Refresh all now"), which
+  forces every widget.
 
-**Long-cadence widgets (daily, etc.) won't refetch on reload — by design.**
-A widget that declares, say, a 24-hour interval stays "fresh" for 24 hours,
-so reloading the page keeps showing the cached value rather than hammering
-the source on every visit. If you need fresher data, use the force-refresh
-button or lower the tracker's refresh interval. (Auto-refresh, when enabled
-in Settings, arms one timer per widget at that widget's own cadence — so
-volatile widgets update often and daily ones rarely.)
+**Long-cadence widgets (daily, etc.) won't refetch on reload — by design.** A
+widget that declares a 24-hour interval is only re-run by the engine once a day,
+so reloading the page keeps showing the cached snapshot rather than hammering the
+source on every visit. If you need fresher data, use the force-refresh button or
+lower the tracker's refresh interval. Because runs are presence-gated, the engine
+only schedules while someone is watching (see
+[Widgets never load](#widgets-never-load--stay-on-the-loading-state)).
 
 ---
 
@@ -383,11 +390,14 @@ Then start again.
 ## FAQ
 
 **Does plugdash store historical data / metrics over time?**
-No. plugdash is **just-in-time and stateless**: every widget runs its plugin
-freshly when asked and shows the current result. It does not keep a time
-series. The only client-side persistence is the per-widget localStorage cache
-described above, which only holds each widget's *most recent* result for fast
-reloads.
+No. plugdash is **just-in-time** and keeps **no history**: every run reconstructs
+the current result (any "over time" chart is derived from the source's own
+timestamps on each run). It does persist the **latest snapshot per tracker** in a
+`snapshots` table — one row per tracker, overwritten each run — purely so the
+dashboard paints instantly after a restart and a restart doesn't re-trigger
+checks whose interval hasn't elapsed. That is last-known state, not a time series.
+(The browser keeps no widget result cache; the only client-side `localStorage` use
+is the theme preference.)
 
 **Is there authentication / login?**
 No. plugdash has no user accounts or auth layer. Run it on a **trusted
@@ -397,8 +407,10 @@ can reach the listen address can view and edit trackers and settings.
 **Where is the database?**
 A single SQLite file. By default it is `plugdash.db` in the working directory
 (resolved to an absolute path at startup); override with the `-db` flag. It
-stores your trackers and settings only — no result history. The driver is
-pure-Go (`modernc.org/sqlite`, no CGO) and uses WAL mode.
+stores your trackers, settings, and the latest snapshot per tracker (a
+`snapshots` table — last-known state for an instant restart, not history); no
+time series is kept. The driver is pure-Go (`modernc.org/sqlite`, no CGO) and uses
+WAL mode.
 
 **How do I back it up?**
 Copy the `.db` file. Because WAL mode is used, also copy the sidecar files if
@@ -423,5 +435,7 @@ discovery requirements.
 | `-addr` | — | `:8080` | HTTP listen address |
 | `-db` | — | `plugdash.db` | SQLite database file path |
 | `-plugins-dir` | `PLUGDASH_PLUGINS_DIR` | `~/.config/plugdash/plugins` | external plugins directory |
+| `-config` | — | unset | declarative config file (YAML); trackers reconciled read-only into the DB |
 | `-debug` | `PLUGDASH_DEBUG=1` | off | verbose debug logging (also toggleable in Settings) |
+| `-version` | — | off | print the version and exit |
 | — | `GITHUB_TOKEN` | unset | token for GitHub plugins (also settable in Settings) |

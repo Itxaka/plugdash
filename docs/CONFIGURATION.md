@@ -14,7 +14,9 @@ All flags are optional and have sane defaults. They are parsed by
 | `-addr`        | `:8080`        | HTTP listen address (host:port). Use e.g. `127.0.0.1:8080` to bind only to localhost.    |
 | `-db`          | `plugdash.db`  | Path to the SQLite database file. Relative paths are resolved to an absolute path at startup. The file (and its WAL sidecars) is created if it does not exist. |
 | `-plugins-dir` | `""` (unset)   | Directory of external plugin executables. When unset, falls back to the environment variable and then a default location (see [Plugins directory resolution](#plugins-directory-resolution)). |
+| `-config`      | `""` (unset)   | Path to a declarative config file (YAML). Trackers in it are reconciled into the DB and shown read-only in the UI. See [Config-as-code](#config-as-code--declarative-configuration). |
 | `-debug`       | `false`        | Enable verbose debug logging (each tracker run, outbound GitHub queries, external plugin stderr). Also enabled via `PLUGDASH_DEBUG` or the Settings toggle. |
+| `-version`     | `false`        | Print the version and exit.                                                              |
 
 ## Environment variables
 

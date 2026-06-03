@@ -198,10 +198,18 @@ appropriate status code.
 | Method   | Path                       | Purpose                                            |
 | -------- | -------------------------- | -------------------------------------------------- |
 | `GET`    | `/api/plugins`             | List available plugins and their config schemas.   |
+| `POST`   | `/api/plugins/rescan`      | Re-scan the external plugins directory.            |
 | `GET`    | `/api/trackers`            | List all saved trackers.                           |
 | `POST`   | `/api/trackers`            | Create a tracker.                                  |
-| `DELETE` | `/api/trackers/{id}`       | Delete a tracker. `204` on success, `404` if missing. |
-| `GET`    | `/api/trackers/{id}/run`   | Run a tracker and return its result (or error).    |
+| `PUT`    | `/api/trackers/{id}`       | Update a tracker. `403` if managed by config (`source="file"`). |
+| `DELETE` | `/api/trackers/{id}`       | Delete a tracker. `204` on success, `404` if missing, `403` if managed by config. |
+| `GET`    | `/api/trackers/{id}/run`   | Return the cached snapshot for a tracker; `?force=true` enqueues an immediate re-run. |
+| `GET`    | `/api/run`                 | Return the cached snapshots for all trackers (counts as a presence poll). |
+| `GET`    | `/api/stream`              | Server-Sent Events stream of snapshot frames.      |
+| `GET`    | `/api/settings`            | Get persisted settings (GitHub token, debug).      |
+| `PUT`    | `/api/settings`            | Update persisted settings.                         |
+| `GET`    | `/api/logs`                | Recent log entries from the in-memory ring.        |
+| `DELETE` | `/api/logs`                | Clear the in-memory log ring.                      |
 | `GET`    | `/`                        | The embedded web UI (static assets).               |
 
 ### `GET /api/plugins`
@@ -289,13 +297,18 @@ Returns `204 No Content` on success, `404` if the tracker does not exist.
 
 ### `GET /api/trackers/{id}/run`
 
-Executes the tracker's plugin (with a 30-second timeout) and returns the result.
-A plugin error is captured in the `error` field rather than failing the request,
-so the response is always `200` for an existing tracker.
+Returns the latest cached snapshot for the tracker — the server-side engine runs
+trackers on their own cadence and caches one result shared by all clients, so
+this does **not** trigger a fresh upstream call by itself. Append `?force=true`
+to enqueue an immediate re-run (the fresh result arrives over `/api/stream`). A
+plugin error is captured in the `error` field rather than failing the request,
+so the response is `200` for a tracker that has run. A tracker that has not run
+yet returns `202` with `{"tracker_id": N, "pending": true}`; an unknown id is
+`404`.
 
-The response also includes `refresh_interval_seconds` — the plugin's declared
-auto-refresh cadence in whole seconds — so the UI knows how often to re-run this
-widget automatically.
+The snapshot includes `refresh_interval_seconds` — the plugin's effective
+cadence in whole seconds — and `fetched_at`, the time the cached result was
+produced. (See [docs/API.md](docs/API.md) for the full snapshot shape.)
 
 ```json
 {
@@ -303,6 +316,7 @@ widget automatically.
   "name": "kubernetes releases",
   "plugin_id": "github-releases",
   "refresh_interval_seconds": 86400,
+  "fetched_at": "2026-06-02T10:00:00Z",
   "result": {
     "visualization": "list",
     "title": "kubernetes/kubernetes — latest 5 releases",
@@ -473,6 +487,20 @@ required.
 | `github_token` | GitHub token         | `string` | no       | Used only to resolve `tag_source`. Falls back to `GITHUB_TOKEN`. |
 
 \* Provide `tags`, `tag_source`, or both.
+
+#### File Value Watcher — `file-version` (visualization: `stat`)
+
+Reads a file on a GitHub repo branch (over `raw.githubusercontent.com`, public
+repos only) and reports the value of a named variable as a single stat — handy
+for watching a pinned dependency or the `go` directive in a `go.mod`. Default
+refresh interval: **1 hour**.
+
+| Key    | Label          | Type     | Required | Default | Notes |
+| ------ | -------------- | -------- | -------- | ------- | ----- |
+| `repo` | Repository     | `string` | yes      | —       | `owner/repo` or full URL. |
+| `ref`  | Branch or tag  | `string` | no       | `main`  | Branch/tag to read from. |
+| `path` | File path      | `string` | yes      | —       | Path to the file within the repo. |
+| `key`  | Variable name  | `string` | yes      | —       | Name left of a `=` / `:` (or whitespace, e.g. the `go.mod` `go` directive). |
 
 ## Writing a plugin
 

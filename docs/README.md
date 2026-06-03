@@ -4,11 +4,13 @@
 **widgets**. Each widget tracks one thing across your repositories and
 services — CI status, release/artifact checks, latest releases,
 activity-over-time, issues that need attention, Docker image availability,
-HTTP health, RSS feeds, and more. Data is fetched **just-in-time** on each
-refresh and rendered as a chosen visualization; nothing is stored except the
-small set of saved widget configurations (trackers) in a single SQLite file.
-The API server and web UI ship together as one self-contained Go binary with
-the frontend embedded.
+HTTP health, RSS feeds, and more. Trackers run on the **server** on their own
+cadence; one cached snapshot per tracker is shared by all clients and pushed
+live over SSE. Data is fetched **just-in-time** and rendered as a chosen
+visualization; **no history** is kept. A single SQLite file holds the saved
+widget configurations (trackers), settings, and the latest snapshot per tracker
+(for an instant restart). The API server and web UI ship together as one
+self-contained Go binary with the frontend embedded.
 
 ## 60-second Quick Start
 
@@ -61,8 +63,9 @@ deployment behind a reverse proxy (`DEPLOYMENT.md`), tuning refresh and tokens
   config schema, and exposes a `Run` method that fetches data and returns a
   result plus a visualization type. Plugins are registered at startup.
 - **Tracker** — a saved plugin configuration: a plugin id plus the
-  user-supplied config values. Trackers are persisted in SQLite and are the
-  only state plugdash keeps.
+  user-supplied config values. Trackers are persisted in SQLite (alongside
+  settings and a cached latest-snapshot per tracker); plugdash keeps **no
+  history**.
 - **Widget** — a tracker as it appears on the dashboard: one card showing that
   tracker's latest rendered result. Cards are drag-and-drop reorderable and the
   order persists.

@@ -76,35 +76,31 @@ anything about the plugin internals.
   {
     "id": "github-releases",
     "name": "GitHub Releases",
-    "description": "Latest releases for one or more repositories",
-    "refresh_interval_seconds": 900,
+    "description": "Track the latest releases of a GitHub repository.",
+    "refresh_interval_seconds": 86400,
     "external": false,
     "schema": [
       {
-        "key": "repos",
-        "label": "Repositories",
-        "type": "list",
+        "key": "repo",
+        "label": "Repository",
+        "type": "string",
         "required": true,
-        "placeholder": "owner/repo, owner/other",
-        "help": "One or more owner/repo entries, comma or newline separated."
+        "placeholder": "owner/repo",
+        "help": "GitHub repository as owner/repo or full URL."
       },
       {
-        "key": "include_prereleases",
-        "label": "Include pre-releases",
+        "key": "count",
+        "label": "Number of releases",
+        "type": "number",
+        "required": false,
+        "default": 5
+      },
+      {
+        "key": "show_prereleases",
+        "label": "Show prereleases",
         "type": "bool",
         "required": false,
         "default": false
-      },
-      {
-        "key": "sort",
-        "label": "Sort order",
-        "type": "select",
-        "required": false,
-        "default": "newest",
-        "options": [
-          { "value": "newest", "label": "Newest first" },
-          { "value": "oldest", "label": "Oldest first" }
-        ]
       }
     ]
   }
@@ -188,7 +184,7 @@ A tracker object has the following shape:
   "id": 1,
   "plugin_id": "github-releases",
   "name": "Kubernetes releases",
-  "config": { "repos": ["kubernetes/kubernetes"] },
+  "config": { "repo": "kubernetes/kubernetes" },
   "refresh_interval_seconds": 0,
   "created_at": "2026-06-02T10:15:00Z",
   "source": "db"
@@ -232,7 +228,7 @@ Creates a tracker.
 {
   "plugin_id": "github-releases",
   "name": "Kubernetes releases",
-  "config": { "repos": ["kubernetes/kubernetes"] },
+  "config": { "repo": "kubernetes/kubernetes" },
   "refresh_interval_seconds": 0
 }
 ```
@@ -275,7 +271,7 @@ empty/omitted, the existing name is preserved.
 ```json
 {
   "name": "Kubernetes releases (stable only)",
-  "config": { "repos": ["kubernetes/kubernetes"], "include_prereleases": false },
+  "config": { "repo": "kubernetes/kubernetes", "show_prereleases": false },
   "refresh_interval_seconds": 1800
 }
 ```
@@ -671,7 +667,7 @@ curl -X POST http://localhost:8080/api/trackers \
   -d '{
     "plugin_id": "github-releases",
     "name": "Kubernetes releases",
-    "config": { "repos": ["kubernetes/kubernetes"] },
+    "config": { "repo": "kubernetes/kubernetes" },
     "refresh_interval_seconds": 0
   }'
 ```
@@ -718,7 +714,7 @@ Update a tracker:
 ```bash
 curl -X PUT http://localhost:8080/api/trackers/1 \
   -H 'Content-Type: application/json' \
-  -d '{ "name": "K8s releases", "config": { "repos": ["kubernetes/kubernetes"] }, "refresh_interval_seconds": 1800 }'
+  -d '{ "name": "K8s releases", "config": { "repo": "kubernetes/kubernetes" }, "refresh_interval_seconds": 1800 }'
 ```
 
 Delete a tracker:

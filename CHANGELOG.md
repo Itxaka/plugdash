@@ -1,0 +1,69 @@
+# Changelog
+
+All notable changes to plugdash are documented here. The format is based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
+follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.2.0] - 2026-06-03
+
+This release moves tracker execution off the browser and onto the server, adds
+declarative configuration, and makes the result cache survive restarts.
+
+### Added
+
+- **Server-side execution engine.** Trackers now run on the server on their own
+  cadence. The latest result per tracker is cached as a `Snapshot` and shared by
+  every connected client, so N viewers cost one upstream API call, not N. Still
+  real-time only — the latest snapshot, never history.
+- **Presence-gating.** The engine only refreshes while at least one client is
+  watching (an SSE subscriber, or a `GET /api/run` poll within the last 20s) and
+  goes fully idle — zero upstream calls — when nobody is looking.
+- **Live updates over Server-Sent Events.** `GET /api/stream` replays the current
+  snapshots on connect and pushes each re-run; the browser uses `EventSource`
+  with an 8s cached-poll fallback. A **Live** toggle in the dashboard toolbar
+  controls it (default on).
+- **Config-as-code.** A new `--config <file.yaml>` flag declaratively defines
+  trackers. File-managed trackers are reconciled into the store and shown
+  read-only in the UI (a `config` badge; edit/delete disabled), while users can
+  still add their own ad-hoc trackers — a hybrid model. See
+  `docs/CONFIGURATION.md` and `examples/plugdash.yaml`.
+- **Snapshot persistence.** The latest result per tracker is persisted to a
+  `snapshots` table and restored on startup, so a restart paints the dashboard
+  instantly from last-known data and — by restoring each tracker's last-run time —
+  does **not** re-run trackers whose interval hasn't elapsed. No more burst of
+  fresh upstream calls on every redeploy/crashloop.
+- **GitHub ETag conditional requests.** A shared cache sends `If-None-Match`, so
+  unchanged resources return `304 Not Modified` (which GitHub does not charge
+  against the rate limit) and reuse the cached body.
+- **GitHub rate-limit back-off.** On a `403`/`429` reporting an exhausted budget
+  (or a `Retry-After`), further calls for that token fail fast until the reset
+  instead of hammering the API.
+- **First-run stagger.** Trackers that have never run are spread across a short
+  window so a fleet of same-interval trackers doesn't fire in one synchronized
+  burst; every widget still paints within ~10s.
+- **Built-in `file-version` plugin.** Tracks the value of a variable in a file on
+  a repository branch (e.g. the Go version in `go.mod`).
+- **GitHub avatars and SVG type icons.** Cards show owner/repo avatars and a
+  per-plugin-type SVG icon.
+- A per-widget **force refresh** (`GET /api/trackers/{id}/run?force=true`) that
+  runs one tracker immediately regardless of presence or interval.
+
+### Changed
+
+- Execution is server-driven: the client-side per-widget refresh timers and the
+  `localStorage` widget cache were removed in favor of the engine + SSE.
+- `GET /api/run` now serves the cached snapshots (and records presence) instead
+  of triggering synchronous runs; `GET /api/trackers/{id}/run` returns the cached
+  snapshot (`202` while a first run is pending).
+- Auto-refresh / **Live** now defaults on, since viewing the dashboard is what
+  drives (and gates) execution.
+- Toolchain and dependencies: Docker image builds on Go 1.26, CI runs on Node 24,
+  and `goreleaser-action` was updated to v7.
+
+### Fixed
+
+- The "updated X ago" card label now ages live (re-computed every 30s on the
+  client, no server calls) instead of freezing on "just now" until a full page
+  reload; the exact fetch time is available on hover.
+
+[0.2.0]: https://github.com/Itxaka/plugdash/compare/v0.1.6...v0.2.0

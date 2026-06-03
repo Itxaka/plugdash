@@ -277,8 +277,9 @@ A `.viz-stat` with a large `.stat-value` (colored by `status`) and an optional
 - **Renderer:** `renderTimeseries`
 
 A small SVG line/area chart of a value over time, with a headline total and a
-date axis. Used by `github-stars` (cumulative star history) and
-`github-activity-rate`. Points must be supplied in **ascending** time order.
+date axis. Used by `github-activity` (cumulative stars/commits/issues/PRs
+history) and `github-activity-rate`. Points must be supplied in **ascending**
+time order.
 
 ### Data shape
 
