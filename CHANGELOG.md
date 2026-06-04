@@ -4,6 +4,26 @@ All notable changes to plugdash are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-04
+
+### Added
+
+- **Theme picker** in **Settings → Themes**, with a live preview per theme. Built
+  with a small theme registry; `matrix` is now a first-class, selectable theme
+  (still console-enabled too).
+- **User themes.** Drop a `*.css` file into `--themes-dir` (`$PLUGDASH_THEMES_DIR`,
+  default `~/.config/plugdash/themes`; `/data/themes` in Docker) and it becomes a
+  selectable theme — the file name is the theme id and it targets
+  `[data-theme="<id>"]`, re-skinning the whole UI. Served at `GET /api/themes`
+  (list) and `GET /api/themes.css` (concatenated), rescanned on reload. See the
+  new [docs/THEMES.md](docs/THEMES.md) and [examples/themes/ocean.css](examples/themes/ocean.css).
+- **Monokai** built-in theme (the classic editor palette).
+- **Settings is now two tabs** — **Config** (auto-refresh, debug, token, sizing,
+  external plugins) and **Themes**.
+- `github-review-requested` gains **`high_priority` / `low_priority` author lists**
+  so the queue orders high → normal → low (within a tier, newest-updated). The
+  special `*[bot]` entry matches any `…[bot]` login, sinking automated accounts.
+
 ## [0.4.2] - 2026-06-04
 
 ### Added
@@ -172,6 +192,7 @@ declarative configuration, and makes the result cache survive restarts.
   client, no server calls) instead of freezing on "just now" until a full page
   reload; the exact fetch time is available on hover.
 
+[0.5.0]: https://github.com/Itxaka/plugdash/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/Itxaka/plugdash/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Itxaka/plugdash/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Itxaka/plugdash/compare/v0.3.0...v0.4.0
