@@ -91,6 +91,31 @@
   color-scheme: dark;
 }
 
+/* ---------- Monokai theme (the classic editor palette) ---------- */
+[data-theme="monokai"] {
+  --bg: #272822;
+  --bg-elev: #2f302a;
+  --bg-elev-2: #3a3b32;
+  --border: #49483e;
+  --border-soft: #3a3b32;
+  --border-strong: #75715e;
+  --text: #f8f8f2;
+  --text-muted: #a59f85;
+  --text-dim: #75715e;
+  --accent: #66d9ef;
+  --accent-hover: #a1e9f6;
+  --accent-soft: rgba(102, 217, 239, 0.14);
+  --accent-glow: rgba(102, 217, 239, 0.4);
+  --green: #a6e22e;
+  --red: #f92672;
+  --yellow: #e6db74;
+  --pill-bg: #3a3b32;
+  --card-top: #2c2d26;
+  --topbar-bg: rgba(39, 40, 34, 0.82);
+  --on-accent: #1e1f1a;
+  color-scheme: dark;
+}
+
 /* Phosphor glow on text + a CRT scanline overlay. */
 html[data-theme="matrix"] body {
   text-shadow: 0 0 2px rgba(57, 255, 20, 0.45);

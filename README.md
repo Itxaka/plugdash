@@ -24,9 +24,9 @@ binary with the frontend embedded.
 - **Per-widget sizing & text size.** Widgets can ask for a wider/taller tile, and
   a per-browser text-size preference packs more info per card or makes it easier
   to read.
-- **Themes.** Dark, light, and a green-CRT **matrix** theme — pick one (with a
-  live preview) in **Settings → Themes** — or drop your own CSS file in the
-  themes dir to re-skin the whole UI. See [docs/THEMES.md](docs/THEMES.md).
+- **Themes.** Dark, light, Monokai, and a green-CRT **matrix** theme — pick one
+  (with a live preview) in **Settings → Themes** — or drop your own CSS file in
+  the themes dir to re-skin the whole UI. See [docs/THEMES.md](docs/THEMES.md).
 - **Live updates over SSE.** The browser subscribes to a stream
   (`/api/stream`) and results are pushed as they're ready — no manual reload.
   A **Live** toggle (on by default) controls it.

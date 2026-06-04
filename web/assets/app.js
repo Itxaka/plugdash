@@ -2155,6 +2155,7 @@ function setupTheme() {
 const THEMES = [
   { id: "dark", label: "Dark" },
   { id: "light", label: "Light" },
+  { id: "monokai", label: "Monokai" },
   { id: "matrix", label: "Matrix" },
 ];
 

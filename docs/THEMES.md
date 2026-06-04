@@ -1,7 +1,7 @@
 # Themes
 
-plugdash ships three built-in themes — **Dark** (default), **Light**, and
-**Matrix** (green CRT) — and lets you drop in your own as plain CSS files. Pick a
+plugdash ships four built-in themes — **Dark** (default), **Light**, **Monokai**,
+and **Matrix** (green CRT) — and lets you drop in your own as plain CSS files. Pick a
 theme in **Settings → Themes**; the choice is saved per browser.
 
 ## How themes work

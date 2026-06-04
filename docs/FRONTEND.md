@@ -326,7 +326,7 @@ are described under "Dashboard rendering" above.
 
 ### Themes
 
-Themes are `dark` (default), `light`, and `matrix` (green CRT). They are CSS
+Themes are `dark` (default), `light`, `monokai`, and `matrix` (green CRT). They are CSS
 variable blocks selected by `[data-theme="…"]` (dark is `:root`), applied to
 `<html>` by `applyTheme(id)` and persisted to `localStorage` (`plugdash:theme`).
 The inline pre-paint script in `index.html` re-applies the saved theme before
