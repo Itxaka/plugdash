@@ -4,6 +4,24 @@ All notable changes to plugdash are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims to
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-06-04
+
+### Added
+
+- A hidden **`matrix` theme** — green-on-black CRT (monospace, phosphor glow,
+  faint scanlines, glyph-rain). Not in the UI; enable from the browser console
+  with `plugdash.matrix()` (`plugdash.unmatrix()` / `plugdash.theme(…)` too).
+  Persisted in localStorage and applied pre-paint like the other themes; the
+  rain respects `prefers-reduced-motion`.
+
+### Fixed
+
+- Avatars load from the cookieless `avatars.githubusercontent.com/<login>` host
+  instead of `github.com/<login>.png`. The latter 302-redirects and sets a
+  `_gh_sess` cookie that browsers reject cross-site, spamming the devtools
+  console. (Existing persisted snapshots keep their old avatar URL until the
+  tracker re-runs.)
+
 ## [0.4.1] - 2026-06-03
 
 ### Added
@@ -154,6 +172,7 @@ declarative configuration, and makes the result cache survive restarts.
   client, no server calls) instead of freezing on "just now" until a full page
   reload; the exact fetch time is available on hover.
 
+[0.4.2]: https://github.com/Itxaka/plugdash/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Itxaka/plugdash/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Itxaka/plugdash/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Itxaka/plugdash/compare/v0.2.0...v0.3.0
