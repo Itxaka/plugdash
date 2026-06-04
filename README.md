@@ -25,7 +25,8 @@ binary with the frontend embedded.
   a per-browser text-size preference packs more info per card or makes it easier
   to read.
 - **Themes.** Dark, light, and a green-CRT **matrix** theme — pick one (with a
-  live preview) in **Settings → Appearance**.
+  live preview) in **Settings → Themes** — or drop your own CSS file in the
+  themes dir to re-skin the whole UI. See [docs/THEMES.md](docs/THEMES.md).
 - **Live updates over SSE.** The browser subscribes to a stream
   (`/api/stream`) and results are pushed as they're ready — no manual reload.
   A **Live** toggle (on by default) controls it.
@@ -59,6 +60,7 @@ Full docs live in [`docs/`](docs/README.md):
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, components, data flow |
 | [PLUGIN_CATALOG.md](docs/PLUGIN_CATALOG.md) | Every built-in plugin + config + examples |
 | [VISUALIZATIONS.md](docs/VISUALIZATIONS.md) | Visualization types & data shapes |
+| [THEMES.md](docs/THEMES.md) | Built-in themes + adding your own (drop a CSS file) |
 | [PLUGINS.md](docs/PLUGINS.md) | Writing a plugin (Go + external/any-language) |
 | [API.md](docs/API.md) | REST API reference |
 | [CONFIGURATION.md](docs/CONFIGURATION.md) | Flags, env vars, settings, tokens |
@@ -159,6 +161,7 @@ Dashboard cards are **drag-and-drop reorderable**, and the chosen order
 | `-addr` | `:8080`       | HTTP listen address.                 |
 | `-db`   | `plugdash.db` | Path to the SQLite database file. Resolved to an absolute path at startup; created if it does not exist. |
 | `-plugins-dir` | _(see below)_ | Directory of external plugin executables. Defaults to `$PLUGDASH_PLUGINS_DIR`, else `~/.config/plugdash/plugins`. |
+| `-themes-dir` | _(see below)_ | Directory of user theme CSS files. Defaults to `$PLUGDASH_THEMES_DIR`, else `~/.config/plugdash/themes`. See [docs/THEMES.md](docs/THEMES.md). |
 | `-config` | _(none)_ | Path to a declarative config file (YAML, "config-as-code"). Trackers in it are reconciled into the DB and carry a `config` badge (not editable from the UI, but deletable — a reload restores them). See [docs/CONFIGURATION.md](docs/CONFIGURATION.md). |
 | `-debug` | `false` | Verbose logging (each run, outbound queries, plugin output). Also via `PLUGDASH_DEBUG=1` or the Settings toggle. |
 | `-version` | `false` | Print the version and exit. |

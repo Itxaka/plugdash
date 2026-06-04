@@ -18,6 +18,7 @@ VOLUME ["/data"]
 
 EXPOSE 8080
 ENV PLUGDASH_PLUGINS_DIR=/data/plugins \
+    PLUGDASH_THEMES_DIR=/data/themes \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 ENTRYPOINT ["/plugdash"]

@@ -46,6 +46,7 @@ func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
 	dbPath := flag.String("db", "plugdash.db", "path to the SQLite database file")
 	pluginsDir := flag.String("plugins-dir", "", "directory of external plugin executables (default: $PLUGDASH_PLUGINS_DIR or ~/.config/plugdash/plugins)")
+	themesDir := flag.String("themes-dir", "", "directory of user theme CSS files (default: $PLUGDASH_THEMES_DIR or ~/.config/plugdash/themes)")
 	debug := flag.Bool("debug", false, "enable verbose debug logging (also via PLUGDASH_DEBUG=1 or the Settings toggle)")
 	configPath := flag.String("config", "", "path to a declarative config file (YAML); trackers in it are reconciled and shown read-only in the UI")
 	showVersion := flag.Bool("version", false, "print version and exit")
@@ -148,6 +149,10 @@ func main() {
 	// Expose the declarative config path so the UI's "reload from file" action
 	// can re-reconcile from it.
 	srv.SetConfigPath(*configPath)
+	// User themes: a directory of *.css files, each one a selectable theme.
+	if dir := resolveThemesDir(*themesDir); dir != "" {
+		srv.SetThemesDir(dir)
+	}
 
 	// External plugins: discover executables in the plugins directory and
 	// register them alongside the built-ins. The directory is resolved from the
@@ -190,6 +195,21 @@ func resolvePluginsDir(flagVal string) string {
 	}
 	if cfg, err := os.UserConfigDir(); err == nil {
 		return filepath.Join(cfg, "plugdash", "plugins")
+	}
+	return ""
+}
+
+// resolveThemesDir picks the user themes directory: an explicit flag wins, then
+// $PLUGDASH_THEMES_DIR, then a default under the user config dir.
+func resolveThemesDir(flagVal string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	if env := os.Getenv("PLUGDASH_THEMES_DIR"); env != "" {
+		return env
+	}
+	if cfg, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(cfg, "plugdash", "themes")
 	}
 	return ""
 }

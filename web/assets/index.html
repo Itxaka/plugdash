@@ -10,13 +10,18 @@
     try {
       var q = new URLSearchParams(location.search).get("theme");
       var t = q || localStorage.getItem("plugdash:theme");
-      if (t === "light" || t === "matrix") document.documentElement.dataset.theme = t;
+      // Any non-dark theme (built-in or user) is set as the attribute; the CSS
+      // (style.css for built-ins, /api/themes.css for user themes) does the rest.
+      if (t && t !== "dark") document.documentElement.dataset.theme = t;
       if (q) localStorage.setItem("plugdash:theme", q);
       var fs = localStorage.getItem("plugdash:fontscale");
       if (fs === "small" || fs === "large") document.documentElement.dataset.fontScale = fs;
     } catch (e) {}
   </script>
   <link rel="stylesheet" href="/style.css" />
+  <!-- User themes dropped into the themes dir (each *.css targets
+       [data-theme="<id>"]). Concatenated and served by the server. -->
+  <link rel="stylesheet" href="/api/themes.css" />
 </head>
 <body>
   <header class="topbar">

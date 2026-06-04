@@ -375,6 +375,53 @@ func TestUpdateFileTrackerForbidden(t *testing.T) {
 	}
 }
 
+func TestThemes(t *testing.T) {
+	srv := newTestServer(t)
+
+	// No themes dir configured: empty list, empty (200) CSS.
+	rec := do(t, srv, http.MethodGet, "/api/themes", "")
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
+		t.Fatalf("themes (none) = %d %q, want 200 []", rec.Code, rec.Body.String())
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(dir+"/ocean.css", []byte("/* plugdash-theme: Ocean */\n[data-theme=\"ocean\"]{--bg:#000}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/plain.css", []byte("[data-theme=\"plain\"]{--bg:#111}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+"/notcss.txt", []byte("ignored"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv.SetThemesDir(dir)
+
+	rec = do(t, srv, http.MethodGet, "/api/themes", "")
+	var list []themeDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("got %d themes, want 2 (.txt ignored): %+v", len(list), list)
+	}
+	// Sorted by filename: ocean, plain. Label from header / prettified id.
+	if list[0].ID != "ocean" || list[0].Label != "Ocean" {
+		t.Errorf("theme[0] = %+v, want ocean/Ocean", list[0])
+	}
+	if list[1].ID != "plain" || list[1].Label != "Plain" {
+		t.Errorf("theme[1] = %+v, want plain/Plain (prettified id)", list[1])
+	}
+
+	rec = do(t, srv, http.MethodGet, "/api/themes.css", "")
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/css") {
+		t.Errorf("content-type = %q, want text/css", ct)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `[data-theme="ocean"]`) || !strings.Contains(body, `[data-theme="plain"]`) {
+		t.Errorf("themes.css missing a theme block:\n%s", body)
+	}
+}
+
 func TestGetConfigStatus(t *testing.T) {
 	srv := newTestServer(t)
 	rec := do(t, srv, http.MethodGet, "/api/config", "")

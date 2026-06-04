@@ -153,6 +153,53 @@ html[data-theme="matrix"] body::after {
   color: var(--accent);
 }
 
+/* Settings tab strip (Config / Themes). */
+.tabs {
+  display: inline-flex;
+  gap: 4px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-soft);
+  padding: 4px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+.tab-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 550;
+  padding: 7px 18px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+.tab-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+.tab-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-glow);
+}
+
+.theme-help {
+  margin-top: 16px;
+}
+.theme-help code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.theme-help a {
+  color: var(--accent);
+}
+
 .theme-preview {
   width: 168px;
   height: 104px;

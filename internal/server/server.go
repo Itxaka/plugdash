@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,11 +52,17 @@ type Server struct {
 	// configPath is the declarative --config file the server was started with
 	// (empty if none). It backs POST /api/trackers/reload, which re-reads it.
 	configPath string
+	// themesDir holds user-supplied theme CSS files (one *.css per theme),
+	// served at /api/themes(.css). Empty if not configured.
+	themesDir string
 }
 
 // SetConfigPath records the declarative config file path so /api/trackers/reload
 // can re-reconcile from it and /api/config can report it. Empty disables reload.
 func (s *Server) SetConfigPath(path string) { s.configPath = path }
+
+// SetThemesDir records the directory of user theme CSS files served to the UI.
+func (s *Server) SetThemesDir(dir string) { s.themesDir = dir }
 
 // SetEngine wires the server-side run engine. When set, /api/run and
 // /api/trackers/{id}/run serve cached snapshots and /api/stream pushes live
@@ -123,6 +131,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/trackers/import", s.handleImportTrackers)
 	s.mux.HandleFunc("GET /api/trackers/export", s.handleExportTrackers)
 	s.mux.HandleFunc("GET /api/config", s.handleGetConfig)
+	s.mux.HandleFunc("GET /api/themes", s.handleListThemes)
+	s.mux.HandleFunc("GET /api/themes.css", s.handleThemesCSS)
 	s.mux.HandleFunc("GET /api/trackers/{id}/run", s.handleRunTracker)
 	s.mux.HandleFunc("GET /api/run", s.handleRunAll)
 	s.mux.HandleFunc("GET /api/stream", s.handleStream)
@@ -440,6 +450,116 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		"configured": s.configPath != "",
 		"path":       s.configPath,
 	})
+}
+
+// --- user themes ---
+//
+// Each *.css file in the themes directory is one theme. The file name (minus
+// .css, restricted to [A-Za-z0-9_-]) is the theme id, and the file must target
+// `[data-theme="<id>"]` (the variables it overrides — see docs). The id keys the
+// picker; the label comes from a `/* plugdash-theme: Name */` header, else the
+// prettified id.
+
+const maxThemeBytes = 512 << 10 // 512 KiB per theme file
+
+type themeDTO struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// themeID validates/normalizes a file's base name into a CSS-safe theme id,
+// returning ok=false for names with unsupported characters.
+func themeID(filename string) (string, bool) {
+	id := strings.TrimSuffix(filename, ".css")
+	if id == "" {
+		return "", false
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return "", false
+		}
+	}
+	return id, true
+}
+
+// themeLabel extracts a `/* plugdash-theme: Name */` header from the CSS, else
+// prettifies the id (foo-bar -> "Foo Bar").
+func themeLabel(css, id string) string {
+	const marker = "plugdash-theme:"
+	if i := strings.Index(css, marker); i >= 0 {
+		rest := css[i+len(marker):]
+		if end := strings.Index(rest, "*/"); end >= 0 {
+			if name := strings.TrimSpace(rest[:end]); name != "" {
+				return name
+			}
+		}
+	}
+	words := strings.FieldsFunc(id, func(r rune) bool { return r == '-' || r == '_' })
+	for i, w := range words {
+		if w != "" {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	if len(words) == 0 {
+		return id
+	}
+	return strings.Join(words, " ")
+}
+
+// themeFiles returns the *.css theme files in themesDir, sorted by name, paired
+// with a valid id. A missing/empty dir yields none.
+func (s *Server) themeFiles() []struct{ id, path string } {
+	var out []struct{ id, path string }
+	if s.themesDir == "" {
+		return out
+	}
+	entries, err := os.ReadDir(s.themesDir)
+	if err != nil {
+		return out
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".css") {
+			continue
+		}
+		id, ok := themeID(e.Name())
+		if !ok {
+			continue
+		}
+		out = append(out, struct{ id, path string }{id, filepath.Join(s.themesDir, e.Name())})
+	}
+	return out
+}
+
+// handleListThemes lists the user themes (id + label) for the Settings picker.
+func (s *Server) handleListThemes(w http.ResponseWriter, r *http.Request) {
+	out := []themeDTO{}
+	for _, f := range s.themeFiles() {
+		head := make([]byte, 256)
+		if fh, err := os.Open(f.path); err == nil {
+			n, _ := fh.Read(head)
+			head = head[:n]
+			fh.Close()
+		}
+		out = append(out, themeDTO{ID: f.id, Label: themeLabel(string(head), f.id)})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleThemesCSS serves every user theme file concatenated as one stylesheet,
+// linked from the page so the themes are available to apply. Always 200 (empty
+// when no themes dir / no files).
+func (s *Server) handleThemesCSS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	for _, f := range s.themeFiles() {
+		fh, err := os.Open(f.path)
+		if err != nil {
+			continue
+		}
+		_, _ = w.Write([]byte("\n/* theme: " + f.id + " */\n"))
+		_, _ = io.Copy(w, io.LimitReader(fh, maxThemeBytes))
+		fh.Close()
+	}
 }
 
 // runResponse carries either a plugin Result or an error string for a single

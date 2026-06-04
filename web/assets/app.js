@@ -92,6 +92,7 @@ const API = {
       body: yaml,
     }),
   getConfig: () => api("/api/config"),
+  themes: () => api("/api/themes"),
   getLogs: () => api("/api/logs"),
   clearLogs: () => api("/api/logs", { method: "DELETE" }),
   getSettings: () => api("/api/settings"),
@@ -1726,9 +1727,10 @@ function renderSchemaForm(form, plugin, onDone, editing, resetToAdd) {
 /* ============================================================
    Settings view
    ============================================================ */
+let settingsTab = "config";
+
 async function renderSettings() {
   clear(main);
-
   main.appendChild(
     el("div", { class: "view-head" }, [
       el("div", {}, [
@@ -1738,17 +1740,39 @@ async function renderSettings() {
     ])
   );
 
-  // Appearance (theme picker) — static, no settings fetch needed.
-  main.appendChild(buildAppearancePanel());
+  const content = el("div");
+  const tabBtns = {};
+  const tabbar = el("div", { class: "tabs" });
+  for (const t of [{ id: "config", label: "Config" }, { id: "themes", label: "Themes" }]) {
+    const b = el("button", { class: "tab-btn", type: "button", text: t.label });
+    b.addEventListener("click", () => show(t.id));
+    tabBtns[t.id] = b;
+    tabbar.appendChild(b);
+  }
+  main.appendChild(tabbar);
+  main.appendChild(content);
 
+  function show(tab) {
+    settingsTab = tab;
+    for (const id in tabBtns) tabBtns[id].classList.toggle("active", id === tab);
+    clear(content);
+    if (tab === "themes") content.appendChild(buildAppearancePanel());
+    else renderSettingsConfig(content);
+  }
+  show(settingsTab);
+}
+
+// renderSettingsConfig builds the server-backed settings (auto-refresh, debug,
+// GitHub token, sizing) plus the external-plugins panel into `host`.
+async function renderSettingsConfig(host) {
   const panel = el("div", { class: "panel" }, [
     el("h2", { text: "Auto-refresh" }),
     el("div", { class: "skeleton", text: "Loading…" }),
   ]);
-  main.appendChild(panel);
+  host.appendChild(panel);
 
   // External plugins panel (rescan).
-  main.appendChild(buildPluginsPanel());
+  host.appendChild(buildPluginsPanel());
 
   let settings;
   try {
@@ -2016,18 +2040,21 @@ function renderLogEntry(e) {
    ============================================================ */
 const THEME_KEY = "plugdash:theme";
 
-// "matrix" is a hidden green-CRT theme — not on the toggle. Enable it from the
-// browser console: plugdash.matrix()  (see the console API at the bottom).
+// Theme id is "dark" (default), "light", "matrix", or any user theme id (a
+// *.css dropped in the themes dir). The current theme is just the <html>
+// data-theme attribute, or "dark" when unset.
 function currentTheme() {
-  const t = document.documentElement.dataset.theme;
-  return t === "light" || t === "matrix" ? t : "dark";
+  return document.documentElement.dataset.theme || "dark";
 }
 
 function applyTheme(t) {
-  if (t === "light" || t === "matrix") document.documentElement.dataset.theme = t;
+  if (t && t !== "dark") document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
   const btn = document.getElementById("theme-toggle");
-  if (btn) btn.textContent = t === "light" ? "☀️" : t === "matrix" ? "🟩" : "🌙";
+  if (btn) {
+    btn.textContent =
+      t === "light" ? "☀️" : t === "matrix" ? "🟩" : t === "dark" ? "🌙" : "🎨";
+  }
   // The glyph rain only runs in the matrix theme.
   if (t === "matrix") startMatrixRain();
   else stopMatrixRain();
@@ -2151,14 +2178,14 @@ function themeSwatch(id) {
   ]);
 }
 
-// buildThemePicker renders one selectable card per theme, each with a live
-// preview. Clicking applies the theme (instant, persisted) and moves the
-// selected highlight.
-function buildThemePicker() {
-  const grid = el("div", { class: "theme-grid" });
-  const cards = [];
+// buildThemePicker renders one selectable card per theme into `grid`, each with
+// a live preview. Clicking applies the theme (instant, persisted) and moves the
+// selected highlight. `cards` accumulates {id, el} so selection can be synced as
+// more themes (e.g. user themes) are appended later.
+function addThemeCards(grid, themes, cards) {
   const selected = currentTheme();
-  for (const t of THEMES) {
+  for (const t of themes) {
+    if (cards.some((c) => c.id === t.id)) continue; // dedupe (built-in vs user)
     const card = el(
       "button",
       { class: "theme-card" + (t.id === selected ? " selected" : ""), type: "button", title: t.label },
@@ -2171,15 +2198,36 @@ function buildThemePicker() {
     cards.push({ id: t.id, el: card });
     grid.appendChild(card);
   }
-  return grid;
 }
 
-// buildAppearancePanel is the Settings panel hosting the theme picker.
+// buildAppearancePanel is the Settings "Themes" tab: the built-in themes plus
+// any user themes (CSS files in the themes dir, fetched from /api/themes), and a
+// short note on how to add your own.
 function buildAppearancePanel() {
+  const grid = el("div", { class: "theme-grid" });
+  const cards = [];
+  addThemeCards(grid, THEMES, cards);
+
+  const note = el("div", { class: "sub theme-help" });
+  note.innerHTML =
+    "Drop a <code>.css</code> file into the themes directory " +
+    "(<code>--themes-dir</code>, default <code>~/.config/plugdash/themes</code>) and reload. " +
+    "The file name is the theme id and it must target " +
+    "<code>[data-theme=\"&lt;id&gt;\"]</code>. See " +
+    '<a href="https://github.com/Itxaka/plugdash/blob/main/docs/THEMES.md" target="_blank" rel="noopener noreferrer">docs/THEMES.md</a>.';
+
+  // Append user themes once fetched.
+  API.themes()
+    .then((list) => {
+      if (Array.isArray(list) && list.length) addThemeCards(grid, list, cards);
+    })
+    .catch(() => {});
+
   return el("div", { class: "panel" }, [
-    el("h2", { text: "Appearance" }),
-    el("div", { class: "sub", text: "Theme — saved in this browser, applied instantly." }),
-    buildThemePicker(),
+    el("h2", { text: "Themes" }),
+    el("div", { class: "sub", text: "Pick a theme — saved in this browser, applied instantly." }),
+    grid,
+    note,
   ]);
 }
 

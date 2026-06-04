@@ -1,0 +1,30 @@
+/* plugdash-theme: Ocean */
+/*
+ * An example user theme. Drop this file into your themes directory
+ * (--themes-dir, default ~/.config/plugdash/themes) and reload — it then
+ * appears in Settings → Themes. The file name (ocean) is the theme id and must
+ * match the [data-theme="ocean"] selector below. See docs/THEMES.md.
+ */
+[data-theme="ocean"] {
+  --bg: #07131f;
+  --bg-elev: #0d2236;
+  --bg-elev-2: #122c44;
+  --border: #1d3a52;
+  --border-soft: #14283a;
+  --border-strong: #2c5274;
+  --text: #dcecff;
+  --text-muted: #8fb0cf;
+  --text-dim: #5f7d9a;
+  --accent: #36c5f0;
+  --accent-hover: #6dd6f6;
+  --accent-soft: rgba(54, 197, 240, 0.14);
+  --accent-glow: rgba(54, 197, 240, 0.4);
+  --green: #2ee6a8;
+  --red: #ff6b81;
+  --yellow: #ffd166;
+  --pill-bg: #122c44;
+  --card-top: #0c2032;
+  --topbar-bg: rgba(7, 19, 31, 0.8);
+  --on-accent: #04121f;
+  color-scheme: dark;
+}

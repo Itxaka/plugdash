@@ -40,6 +40,7 @@ deployment behind a reverse proxy (`DEPLOYMENT.md`), tuning refresh and tokens
 
 - [PLUGIN_CATALOG.md](PLUGIN_CATALOG.md) — every built-in plugin, its config fields, and visualization.
 - [VISUALIZATIONS.md](VISUALIZATIONS.md) — the visualization types (list, table, stat, checklist, timeseries) and the data shapes they expect.
+- [THEMES.md](THEMES.md) — the built-in themes and how to add your own by dropping a CSS file.
 - [CONFIGURATION.md](CONFIGURATION.md) — command-line flags, environment variables, Settings, and GitHub tokens.
 - [DEPLOYMENT.md](DEPLOYMENT.md) — running plugdash, Docker, and reverse-proxy setup.
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — common problems and FAQ.

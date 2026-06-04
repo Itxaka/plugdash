@@ -36,9 +36,10 @@ COPY --from=build /plugdash /plugdash
 
 EXPOSE 8080
 
-# External plugins: drop executables into this dir (it defaults under /data so a
-# single mounted volume persists both the DB and any plugins).
-ENV PLUGDASH_PLUGINS_DIR=/data/plugins
+# External plugins and user themes live under /data so a single mounted volume
+# persists them alongside the DB. Drop executables in plugins/, theme *.css in themes/.
+ENV PLUGDASH_PLUGINS_DIR=/data/plugins \
+    PLUGDASH_THEMES_DIR=/data/themes
 
 ENTRYPOINT ["/plugdash"]
 CMD ["-addr", ":8080", "-db", "/data/plugdash.db"]
