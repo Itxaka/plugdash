@@ -435,4 +435,12 @@ There's an easter egg. On the **Settings** page, enter the
 
 Enjoy. Enter it again to turn it off. 🎉
 
+And one more, for the console dwellers — open your browser devtools and run:
+
+```js
+plugdash.matrix()   // follow the white rabbit 🟩   (plugdash.unmatrix() to leave)
+```
+
+![plugdash matrix theme](docs/images/matrix.png)
+
 </details>

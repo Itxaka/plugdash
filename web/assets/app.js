@@ -2009,24 +2009,84 @@ function renderLogEntry(e) {
 }
 
 /* ============================================================
-   Theme (dark / light)
+   Theme (dark / light / matrix)
    ============================================================ */
 const THEME_KEY = "plugdash:theme";
 
+// "matrix" is a hidden green-CRT theme — not on the toggle. Enable it from the
+// browser console: plugdash.matrix()  (see the console API at the bottom).
 function currentTheme() {
-  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  const t = document.documentElement.dataset.theme;
+  return t === "light" || t === "matrix" ? t : "dark";
 }
 
 function applyTheme(t) {
-  if (t === "light") document.documentElement.dataset.theme = "light";
+  if (t === "light" || t === "matrix") document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
   const btn = document.getElementById("theme-toggle");
-  if (btn) btn.textContent = t === "light" ? "☀️" : "🌙";
+  if (btn) btn.textContent = t === "light" ? "☀️" : t === "matrix" ? "🟩" : "🌙";
+  // The glyph rain only runs in the matrix theme.
+  if (t === "matrix") startMatrixRain();
+  else stopMatrixRain();
   try {
     localStorage.setItem(THEME_KEY, t);
   } catch (e) {
     /* ignore */
   }
+}
+
+/* ---------- matrix glyph rain (only while the matrix theme is active) ---------- */
+let matrixRain = null;
+
+function startMatrixRain() {
+  if (matrixRain) return;
+  // Respect reduced-motion: the theme still applies, just without the animation.
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    return;
+  }
+  const canvas = el("canvas", { class: "matrix-rain", "aria-hidden": "true" });
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext("2d");
+  const glyphs = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃ0123456789ABCDEF<>=*+:.".split("");
+  const state = { canvas, cols: [], fontSize: 14 };
+  const resize = () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const n = Math.ceil(canvas.width / state.fontSize);
+    state.cols = Array.from({ length: n }, () => Math.floor((Math.random() * canvas.height) / state.fontSize));
+  };
+  resize();
+  window.addEventListener("resize", resize);
+  state.resize = resize;
+  matrixRain = state;
+
+  function frame() {
+    if (matrixRain !== state) return;
+    // Translucent black wash leaves fading trails.
+    ctx.fillStyle = "rgba(0, 8, 0, 0.08)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#39ff14";
+    ctx.font = state.fontSize + "px monospace";
+    for (let i = 0; i < state.cols.length; i++) {
+      const ch = glyphs[(Math.random() * glyphs.length) | 0];
+      const x = i * state.fontSize;
+      const y = state.cols[i] * state.fontSize;
+      ctx.fillText(ch, x, y);
+      if (y > canvas.height && Math.random() > 0.975) state.cols[i] = 0;
+      else state.cols[i]++;
+    }
+    state.raf = requestAnimationFrame(frame);
+  }
+  state.raf = requestAnimationFrame(frame);
+}
+
+function stopMatrixRain() {
+  if (!matrixRain) return;
+  const s = matrixRain;
+  matrixRain = null;
+  cancelAnimationFrame(s.raf);
+  window.removeEventListener("resize", s.resize);
+  s.canvas.remove();
 }
 
 /* ---------- text size (per-browser display preference) ---------- */
@@ -2225,6 +2285,42 @@ window.addEventListener("hashchange", () => {
   const view = location.hash.slice(1);
   if (VIEWS.includes(view) && view !== currentView) setView(view);
 });
+
+/* ============================================================
+   Console API — for those who poke around the devtools.
+   plugdash.matrix()  → green-CRT "follow the white rabbit" theme
+   plugdash.unmatrix() / plugdash.theme("dark"|"light"|"matrix")
+   ============================================================ */
+window.plugdash = Object.assign(window.plugdash || {}, {
+  matrix() {
+    applyTheme("matrix");
+    console.log(
+      "%cWake up, Neo… the plugdash has you. 🟩  (plugdash.unmatrix() to leave)",
+      "color:#39ff14;background:#000;font-family:monospace;padding:6px 10px;text-shadow:0 0 6px #39ff14"
+    );
+    return "follow the white rabbit";
+  },
+  unmatrix() {
+    applyTheme("dark");
+    return "back to reality";
+  },
+  theme(t) {
+    applyTheme(t === "light" || t === "matrix" ? t : "dark");
+    return currentTheme();
+  },
+});
+
+// A faint breadcrumb for the curious — no UI affordance, console only.
+try {
+  console.log(
+    "%cplugdash%c — psst: there's a hidden theme. try %cplugdash.matrix()",
+    "color:#5b9dff;font-weight:bold",
+    "color:#888",
+    "color:#39ff14;font-family:monospace"
+  );
+} catch (e) {
+  /* ignore */
+}
 
 // initial — honor a deep-linked view in the URL hash.
 setupTheme();

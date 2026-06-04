@@ -324,6 +324,12 @@ are described under "Dashboard rendering" above.
 > remaining browser `localStorage` use is per-browser display preferences: the
 > theme (`plugdash:theme`) and the text size (`plugdash:fontscale`).
 
+The theme is `dark` (default), `light` (topbar toggle), or a hidden `matrix`
+green-CRT theme enabled only from the console (`plugdash.matrix()` —
+`applyTheme("matrix")` sets `html[data-theme="matrix"]` and starts a glyph-rain
+canvas; `plugdash.unmatrix()` leaves). All themes are applied pre-paint by the
+inline script in `index.html`.
+
 ## Text size
 
 A per-browser display preference, like the theme. The Settings view offers
