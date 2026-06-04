@@ -159,13 +159,15 @@ type Asset struct {
 }
 
 // OwnerAvatarURL returns the GitHub avatar image URL for a user or org login.
-// github.com/<owner>.png redirects to the current avatar and works unauthenticated,
-// so it can be used directly in an <img> tag.
+// It uses the cookieless avatars.githubusercontent.com host (by login), which
+// serves the avatar directly without the 302 via github.com that sets a
+// _gh_sess cookie — so embedding it in an <img> doesn't spam the browser
+// console with cross-site cookie warnings.
 func OwnerAvatarURL(owner string) string {
 	if owner == "" {
 		return ""
 	}
-	return "https://github.com/" + owner + ".png?size=64"
+	return "https://avatars.githubusercontent.com/" + owner + "?size=64"
 }
 
 // Badge is one tone-colored pill on a list item, shared by the issue/PR widgets.
