@@ -324,11 +324,26 @@ are described under "Dashboard rendering" above.
 > remaining browser `localStorage` use is per-browser display preferences: the
 > theme (`plugdash:theme`) and the text size (`plugdash:fontscale`).
 
-The theme is `dark` (default), `light` (topbar toggle), or a hidden `matrix`
-green-CRT theme enabled only from the console (`plugdash.matrix()` —
-`applyTheme("matrix")` sets `html[data-theme="matrix"]` and starts a glyph-rain
-canvas; `plugdash.unmatrix()` leaves). All themes are applied pre-paint by the
-inline script in `index.html`.
+### Themes
+
+Themes are `dark` (default), `light`, and `matrix` (green CRT). They are CSS
+variable blocks selected by `[data-theme="…"]` (dark is `:root`), applied to
+`<html>` by `applyTheme(id)` and persisted to `localStorage` (`plugdash:theme`).
+The inline pre-paint script in `index.html` re-applies the saved theme before
+first paint to avoid a flash.
+
+The **Settings → Appearance** picker (`buildThemePicker`) lists every theme in
+the `THEMES` registry with a **live preview** — `themeSwatch(id)` renders a mini
+card inside a `data-theme="id"` container, so the swatch shows that theme's real
+colors regardless of the page's current theme (this is why the theme variable
+blocks are scoped to `[data-theme]`, not just `html[data-theme]`). Adding a theme
+is a CSS `[data-theme="id"]` block + one `THEMES` entry.
+
+![Theme picker](images/themes.png)
+
+The topbar button quick-toggles dark/light. `matrix` additionally starts a faint
+glyph-rain canvas (`startMatrixRain`, reduced-motion-aware) and is also reachable
+from the console (`plugdash.matrix()` / `plugdash.unmatrix()`).
 
 ## Text size
 

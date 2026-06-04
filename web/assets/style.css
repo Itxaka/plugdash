@@ -1,4 +1,5 @@
-:root {
+:root,
+[data-theme="dark"] {
   /* Layered dark backgrounds */
   --bg: #0a0c10;
   --bg-elev: #14181f;
@@ -35,8 +36,8 @@
     "Liberation Mono", monospace;
 }
 
-/* ---------- Light theme (toggled via html[data-theme="light"]) ---------- */
-html[data-theme="light"] {
+/* ---------- Light theme (data-theme="light" on <html> or a preview swatch) ---------- */
+[data-theme="light"] {
   --bg: #f6f8fa;
   --bg-elev: #ffffff;
   --bg-elev-2: #eef1f4;
@@ -65,7 +66,7 @@ html[data-theme="light"] {
 /* ---------- Matrix theme (hidden; enable from the console: plugdash.matrix()) ----------
    Green-on-black CRT terminal. Monospace everywhere, phosphor glow, faint
    scanlines, and a glyph-rain canvas (added by JS). */
-html[data-theme="matrix"] {
+[data-theme="matrix"] {
   --bg: #000600;
   --bg-elev: #02160a;
   --bg-elev-2: #04240e;
@@ -115,6 +116,102 @@ html[data-theme="matrix"] body::after {
   pointer-events: none;
   z-index: 1;
   opacity: 0.16;
+}
+
+/* ---------- Theme picker (Settings) ----------
+   Each card holds a live preview rendered with that theme's own variables,
+   scoped via data-theme on .theme-preview. */
+.theme-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.theme-card {
+  appearance: none;
+  padding: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.06s ease;
+}
+.theme-card:hover {
+  border-color: var(--border-strong);
+}
+.theme-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.theme-card .theme-label {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text);
+}
+.theme-card.selected .theme-label {
+  color: var(--accent);
+}
+
+.theme-preview {
+  width: 168px;
+  height: 104px;
+  border-radius: 8px;
+  background: var(--bg);
+  padding: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+}
+.theme-preview .tp-card {
+  height: 100%;
+  background: linear-gradient(180deg, var(--card-top) 0%, var(--bg-elev) 70%);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 9px;
+}
+.theme-preview .tp-title {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 12px;
+  font-family: var(--font);
+}
+.theme-preview .tp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+}
+.theme-preview .tp-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.theme-preview .tp-dot.ok {
+  background: var(--green);
+}
+.theme-preview .tp-dot.bad {
+  background: var(--red);
+}
+.theme-preview .tp-line {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--text-muted);
+  opacity: 0.55;
+  flex: 1;
+}
+.theme-preview .tp-line.short {
+  flex: 0 0 40%;
+}
+.theme-preview .tp-pill {
+  font-size: 9px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  flex: 0 0 auto;
 }
 
 * {

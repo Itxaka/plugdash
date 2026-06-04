@@ -1738,6 +1738,9 @@ async function renderSettings() {
     ])
   );
 
+  // Appearance (theme picker) — static, no settings fetch needed.
+  main.appendChild(buildAppearancePanel());
+
   const panel = el("div", { class: "panel" }, [
     el("h2", { text: "Auto-refresh" }),
     el("div", { class: "skeleton", text: "Loading…" }),
@@ -2111,13 +2114,73 @@ function applyFontScale(scale) {
 }
 
 function setupTheme() {
-  applyTheme(currentTheme()); // sync the toggle icon with the pre-paint state
+  applyTheme(currentTheme()); // sync the toggle icon + rain with the pre-paint state
   const btn = document.getElementById("theme-toggle");
   if (btn) {
     btn.addEventListener("click", () =>
       applyTheme(currentTheme() === "light" ? "dark" : "light")
     );
   }
+}
+
+// The selectable themes, shown in Settings. Adding a theme = a CSS
+// `[data-theme="id"]` variable block + an entry here.
+const THEMES = [
+  { id: "dark", label: "Dark" },
+  { id: "light", label: "Light" },
+  { id: "matrix", label: "Matrix" },
+];
+
+// themeSwatch renders a live mini-preview using a theme's own CSS variables,
+// scoped via data-theme on the container (so it shows that theme regardless of
+// the page's current theme).
+function themeSwatch(id) {
+  return el("div", { class: "theme-preview", "data-theme": id }, [
+    el("div", { class: "tp-card" }, [
+      el("div", { class: "tp-title", text: "Aa" }),
+      el("div", { class: "tp-row" }, [
+        el("span", { class: "tp-dot ok" }),
+        el("span", { class: "tp-line" }),
+        el("span", { class: "tp-pill", text: "ok" }),
+      ]),
+      el("div", { class: "tp-row" }, [
+        el("span", { class: "tp-dot bad" }),
+        el("span", { class: "tp-line short" }),
+      ]),
+    ]),
+  ]);
+}
+
+// buildThemePicker renders one selectable card per theme, each with a live
+// preview. Clicking applies the theme (instant, persisted) and moves the
+// selected highlight.
+function buildThemePicker() {
+  const grid = el("div", { class: "theme-grid" });
+  const cards = [];
+  const selected = currentTheme();
+  for (const t of THEMES) {
+    const card = el(
+      "button",
+      { class: "theme-card" + (t.id === selected ? " selected" : ""), type: "button", title: t.label },
+      [themeSwatch(t.id), el("div", { class: "theme-label", text: t.label })]
+    );
+    card.addEventListener("click", () => {
+      applyTheme(t.id);
+      for (const c of cards) c.el.classList.toggle("selected", c.id === t.id);
+    });
+    cards.push({ id: t.id, el: card });
+    grid.appendChild(card);
+  }
+  return grid;
+}
+
+// buildAppearancePanel is the Settings panel hosting the theme picker.
+function buildAppearancePanel() {
+  return el("div", { class: "panel" }, [
+    el("h2", { text: "Appearance" }),
+    el("div", { class: "sub", text: "Theme — saved in this browser, applied instantly." }),
+    buildThemePicker(),
+  ]);
 }
 
 /* ============================================================
