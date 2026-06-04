@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -47,6 +48,20 @@ func (p *Plugin) ConfigSchema() []plugin.ConfigField {
 			Label: "Repositories",
 			Type:  plugin.FieldList,
 			Help:  "Limit to these owner/repo (one per line). Leave empty for all of GitHub.",
+		},
+		{
+			Key:         "high_priority",
+			Label:       "High-priority authors",
+			Type:        plugin.FieldList,
+			Placeholder: "alice\nbob",
+			Help:        "Logins whose PRs sort to the top. One per line. Use *[bot] for any bot.",
+		},
+		{
+			Key:         "low_priority",
+			Label:       "Low-priority authors",
+			Type:        plugin.FieldList,
+			Placeholder: "*[bot]\nrenovate[bot]",
+			Help:        "Logins whose PRs sort to the bottom (e.g. automated bots). Use *[bot] to match any bot.",
 		},
 		{
 			Key:     "count",
@@ -126,6 +141,15 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 		return plugin.Result{}, err
 	}
 
+	// Order by author priority: high first, normal next, low (e.g. bots) last.
+	// Within a tier the search's newest-updated order is preserved (stable sort).
+	high, highBot := prioritySet(cfg.List("high_priority"))
+	low, lowBot := prioritySet(cfg.List("low_priority"))
+	sort.SliceStable(resp.Items, func(i, j int) bool {
+		return authorTier(resp.Items[i].User.Login, high, highBot, low, lowBot) <
+			authorTier(resp.Items[j].User.Login, high, highBot, low, lowBot)
+	})
+
 	items := make([]listItem, 0, len(resp.Items))
 	for _, pr := range resp.Items {
 		repoFullName := repoFromURL(pr.RepositoryURL)
@@ -156,6 +180,40 @@ func (p *Plugin) Run(ctx context.Context, cfg plugin.Config) (plugin.Result, err
 		Title:         fmt.Sprintf("Review requested — %d", len(items)),
 		Data:          map[string]any{"items": items},
 	}, nil
+}
+
+// prioritySet turns a config list of logins into a lowercased lookup set, plus
+// a "bot" flag set when the list contains the *[bot] (or [bot]) wildcard, which
+// matches any login ending in "[bot]". A leading @ is tolerated.
+func prioritySet(list []string) (map[string]bool, bool) {
+	set := map[string]bool{}
+	bot := false
+	for _, e := range list {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if e == "" {
+			continue
+		}
+		if e == "*[bot]" || e == "[bot]" {
+			bot = true
+			continue
+		}
+		set[strings.TrimPrefix(e, "@")] = true
+	}
+	return set, bot
+}
+
+// authorTier ranks a PR author: 0 high-priority, 1 normal, 2 low-priority. High
+// wins ties with low. The bot flags match any login ending in "[bot]".
+func authorTier(login string, high map[string]bool, highBot bool, low map[string]bool, lowBot bool) int {
+	l := strings.ToLower(login)
+	isBot := strings.HasSuffix(l, "[bot]")
+	if high[l] || (highBot && isBot) {
+		return 0
+	}
+	if low[l] || (lowBot && isBot) {
+		return 2
+	}
+	return 1
 }
 
 // repoFromURL derives "OWNER/REPO" from a repository_url of the form

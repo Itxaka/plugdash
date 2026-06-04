@@ -622,11 +622,17 @@ Open, non-draft pull requests waiting for your review, via the GitHub search API
 |-----|-------|------|----------|---------|-------|
 | `login` | Login | string | no | — | Whose requested reviews to show. Empty = the token's user |
 | `repos` | Repositories | list | no | — | Limit to these `owner/repo` (one per line); empty = all of GitHub |
+| `high_priority` | High-priority authors | list | no | — | Logins whose PRs sort to the top (one per line) |
+| `low_priority` | Low-priority authors | list | no | — | Logins whose PRs sort to the bottom, e.g. bots (one per line) |
 | `count` | Number of PRs | number | no | 20 | Max PRs to show |
 | `token` | GitHub token (optional) | string | no | — | Falls back to `GITHUB_TOKEN`; required when `login` is empty |
 
 Each row links to the PR and shows the repo, number, author and the repo owner's
-avatar.
+avatar. Rows are ordered by author priority — **high → normal → low** — and within
+a tier by most-recently-updated. Put real reviewers in `high_priority` and noisy
+automated accounts in `low_priority`; the special entry **`*[bot]`** matches any
+login ending in `[bot]` (renovate, dependabot, …), so a single `*[bot]` line
+sinks all bots to the bottom.
 
 ---
 

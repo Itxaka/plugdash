@@ -37,6 +37,59 @@ const searchItems = `{"total_count":2,"items":[
 	 "repository_url":"https://api.github.com/repos/o/r","user":{"login":"bob"}}
 ]}`
 
+func TestPriorityOrdering(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	// Search order: alice (normal), renovate[bot] (bot), carol (to be high-prio).
+	body := `{"items":[
+		{"number":1,"title":"a","html_url":"https://github.com/o/r/pull/1","updated_at":"2026-05-03T00:00:00Z","repository_url":"https://api.github.com/repos/o/r","user":{"login":"alice"}},
+		{"number":2,"title":"b","html_url":"https://github.com/o/r/pull/2","updated_at":"2026-05-02T00:00:00Z","repository_url":"https://api.github.com/repos/o/r","user":{"login":"renovate[bot]"}},
+		{"number":3,"title":"c","html_url":"https://github.com/o/r/pull/3","updated_at":"2026-05-01T00:00:00Z","repository_url":"https://api.github.com/repos/o/r","user":{"login":"carol"}}
+	]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	prev := plugins.GHBaseURL
+	plugins.GHBaseURL = srv.URL
+	defer func() { plugins.GHBaseURL = prev }()
+
+	res, err := New().Run(context.Background(), plugin.Config{
+		"login":         "octocat",
+		"high_priority": "carol",
+		"low_priority":  "*[bot]",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	items := decodeItems(t, res)
+	if len(items) != 3 {
+		t.Fatalf("want 3 items, got %d", len(items))
+	}
+	// Expected: carol (high), alice (normal), renovate[bot] (low).
+	wantOrder := []string{"@carol", "@alice", "@renovate[bot]"}
+	for i, want := range wantOrder {
+		if !strings.Contains(items[i].Subtitle, want) {
+			t.Errorf("items[%d] subtitle %q, want it to contain %q", i, items[i].Subtitle, want)
+		}
+	}
+}
+
+func TestAuthorTier(t *testing.T) {
+	high, hb := prioritySet([]string{"Alice"})
+	low, lb := prioritySet([]string{"*[bot]", "@spammer"})
+	cases := map[string]int{
+		"alice":         0,
+		"bob":           1,
+		"renovate[bot]": 2,
+		"spammer":       2,
+	}
+	for login, want := range cases {
+		if got := authorTier(login, high, hb, low, lb); got != want {
+			t.Errorf("authorTier(%q) = %d, want %d", login, got, want)
+		}
+	}
+}
+
 // startStub spins up a stub server. userStatus is the status the /user endpoint
 // returns (200 to resolve "octocat", or 401 to simulate a missing/invalid token).
 func startStub(t *testing.T, userStatus int) {
